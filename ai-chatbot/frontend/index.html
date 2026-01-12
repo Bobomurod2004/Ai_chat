@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chatbot - Ollama + Django</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div id="chat-container">
+        <div class="header">
+            <h1>🤖 AI Chatbot</h1>
+            <div class="header-right">
+                <button id="doc-upload-btn" class="btn-secondary" title="Hujjat yuklash">📄 Hujjat</button>
+                <div class="language-selector">
+                    <select id="language-select">
+                        <option value="uz">🇺🇿 O'zbek</option>
+                        <option value="ru">🇷🇺 Русский</option>
+                        <option value="en">🇬🇧 English</option>
+                    </select>
+                </div>
+                <div class="status">
+                    <span id="status-indicator" class="status-dot"></span>
+                    <span id="status-text">Ishga tushmoqda...</span>
+                </div>
+            </div>
+        </div>
+        <div id="chat-box">
+            <div id="messages">
+                <!-- Greeting will be set by JavaScript based on selected language -->
+            </div>
+        </div>
+        <div class="input-container">
+            <input type="text" id="user-input" placeholder="Savolingizni yozing..." autocomplete="off">
+            <button id="send-button">Yuborish</button>
+        </div>
+        <div id="suggested-questions" class="suggested-container">
+            <!-- Suggested questions will be injected here -->
+        </div>
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <span>Model javob tayyorlamoqda...</span>
+        </div>
+    </div>
+    
+    <!-- Document Upload Modal -->
+    <div id="doc-upload-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📄 Hujjat yuklash</h2>
+                <button class="modal-close" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-section">
+                    <h3>Fayl yuklash</h3>
+                    <div class="file-input-wrapper">
+                        <input type="file" id="file-input" accept=".pdf,.docx,.doc,.txt" />
+                        <label for="file-input" class="file-label">
+                            <span id="file-name">📁 Fayl tanlash</span>
+                        </label>
+                    </div>
+                    <p class="hint">PDF, Word yoki Text fayl (max 10MB)</p>
+                </div>
+                
+                <div class="divider">YO'KI</div>
+                
+                <div class="upload-section">
+                    <h3>URL manzil</h3>
+                    <input type="url" id="url-input" placeholder="https://example.com/document" />
+                    <p class="hint">Veb-sahifa URL manzilini kiriting</p>
+                </div>
+                
+                <div class="upload-section">
+                    <h3>Hujjat nomi</h3>
+                    <input type="text" id="doc-title" placeholder="Hujjat nomi" required />
+                </div>
+                
+                <div class="upload-section">
+                    <h3>Tavsif (ixtiyoriy)</h3>
+                    <textarea id="doc-description" placeholder="Qisqacha tavsif..." rows="3"></textarea>
+                </div>
+                
+                <div class="upload-actions">
+                    <button id="upload-btn" class="btn-primary">📤 Yuklash</button>
+                    <button id="cancel-btn" class="btn-secondary">Bekor qilish</button>
+                </div>
+                
+                <div id="upload-progress" class="upload-progress hidden">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <p id="upload-status">Yuklanmoqda...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

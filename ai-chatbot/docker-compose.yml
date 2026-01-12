@@ -1,0 +1,137 @@
+services:
+  db:
+    image: postgres:15
+    container_name: ai_chatbot_db
+    environment:
+      POSTGRES_USER: ai_user
+      POSTGRES_PASSWORD: ai_password
+      POSTGRES_DB: ai_chatbot_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ai_user -d ai_chatbot_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai_chatbot_redis
+    ports:
+      - "6381:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai_chatbot_ollama
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_NUM_PARALLEL=2 # 2 parallel requests (better for multiple users)
+      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_KEEP_ALIVE=30m # Keep model in memory for 30 minutes (optimized)
+      - OLLAMA_NUM_GPU=0 # CPU-only mode (no GPU)
+      - OLLAMA_MAX_QUEUE=512 # Max queue size
+    mem_limit: 10g # 10GB RAM - increased for larger models
+    mem_reservation: 8g # Reserve 8GB
+    cpus: 4.0 # Use 4 CPU cores
+    shm_size: 2gb # Shared memory for model loading
+    restart: unless-stopped
+
+  django:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_chatbot_django
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    command: sh -c "python manage.py collectstatic --noinput && python manage.py migrate --noinput && gunicorn chatbot_project.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 4 --timeout 300 --graceful-timeout 30 --max-requests 1000 --max-requests-jitter 100 --preload"
+    volumes:
+      - ./backend:/app
+      - chroma_data:/app/chroma_db
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=1
+      - DB_HOST=db
+      - DB_PORT=5432
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen2.5:1.5b
+      - OLLAMA_REQUEST_TIMEOUT=60
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/chatbot/health/" ]
+      interval: 30s
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_chatbot_celery_worker
+    command: celery -A chatbot_project worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+      - chroma_data:/app/chroma_db
+    environment:
+      - DEBUG=1
+      - DB_HOST=db
+      - DB_PORT=5432
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen2.5:1.5b
+      - OLLAMA_REQUEST_TIMEOUT=60
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+      - ollama
+    restart: unless-stopped
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_chatbot_celery_beat
+    command: celery -A chatbot_project beat --loglevel=info
+    volumes:
+      - ./backend:/app
+    environment:
+      - DEBUG=1
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    image: nginx:alpine
+    container_name: ai_chatbot_frontend
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - django
+
+volumes:
+  postgres_data:
+  ollama_data:
+  chroma_data:
