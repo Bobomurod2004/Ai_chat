@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="uz">
+
+<head>
+     <meta charset="UTF-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <title>UzSWLU AI Assistant</title>
+     <style>
+          * {
+               margin: 0;
+               padding: 0;
+               box-sizing: border-box;
+          }
+
+          body {
+               font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+               overflow: hidden;
+          }
+
+          /* Full screen iframe container */
+          #chatbot-iframe-container {
+               width: 100%;
+               height: 100vh;
+               border: none;
+               display: block;
+          }
+
+          /* Loading indicator */
+          .loading-overlay {
+               position: fixed;
+               top: 0;
+               left: 0;
+               width: 100%;
+               height: 100%;
+               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+               display: flex;
+               flex-direction: column;
+               align-items: center;
+               justify-content: center;
+               z-index: 9999;
+               transition: opacity 0.3s ease;
+          }
+
+          .loading-overlay.hidden {
+               opacity: 0;
+               pointer-events: none;
+          }
+
+          .spinner {
+               width: 50px;
+               height: 50px;
+               border: 4px solid rgba(255, 255, 255, 0.3);
+               border-top-color: white;
+               border-radius: 50%;
+               animation: spin 1s linear infinite;
+          }
+
+          .loading-text {
+               color: white;
+               margin-top: 20px;
+               font-size: 16px;
+               font-weight: 500;
+          }
+
+          @keyframes spin {
+               to {
+                    transform: rotate(360deg);
+               }
+          }
+     </style>
+</head>
+
+<body>
+     <!-- Loading Overlay -->
+     <div class="loading-overlay" id="loading">
+          <div class="spinner"></div>
+          <div class="loading-text">AI Assistant yuklanmoqda...</div>
+     </div>
+
+     <!-- Chatbot Iframe -->
+     <iframe id="chatbot-iframe-container" src="./index.html" frameborder="0" allow="microphone; camera"
+          sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
+
+     <script>
+          // Hide loading when iframe loads
+          const iframe = document.getElementById('chatbot-iframe-container');
+          const loading = document.getElementById('loading');
+
+          iframe.addEventListener('load', () => {
+               setTimeout(() => {
+                    loading.classList.add('hidden');
+               }, 500);
+          });
+
+          // Handle iframe errors
+          iframe.addEventListener('error', () => {
+               loading.innerHTML = `
+                <div style="color: white; text-align: center;">
+                    <h2>⚠️ Xatolik</h2>
+                    <p>Chatbot yuklanmadi. Sahifani yangilang.</p>
+                </div>
+            `;
+          });
+     </script>
+</body>
+
+</html>
