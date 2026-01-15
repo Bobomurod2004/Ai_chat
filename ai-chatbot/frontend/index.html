@@ -1,101 +1,112 @@
 <!DOCTYPE html>
-<html lang="uz">
+<html lang="uz" data-theme="light">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chatbot - Ollama + Django</title>
+    <title>UzSWLU Assistant | Intelligent Support</title>
+    <!-- Premium Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700&display=swap"
+        rel="stylesheet">
+    <!-- Main Styles -->
     <link rel="stylesheet" href="style.css">
+    <!-- Markdown Rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
-<body>
-    <div id="chat-container">
-        <div class="header">
-            <h1>🤖 AI Chatbot</h1>
-            <div class="header-right">
-                <button id="doc-upload-btn" class="btn-secondary" title="Hujjat yuklash">📄 Hujjat</button>
-                <div class="language-selector">
-                    <select id="language-select">
+
+<body class="bg-surface">
+    <div class="app-container">
+        <!-- Sidebar for Chat History & Context -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">💠</span>
+                    <span class="logo-text">UzSWLU AI</span>
+                </div>
+                <button class="sidebar-toggle-btn" id="sidebar-close-btn">✕</button>
+            </div>
+
+            <button class="btn-new-chat-sidebar" id="new-chat-sidebar">
+                <span>＋</span> Yangi suhbat
+            </button>
+
+            <div class="history-section">
+                <div class="section-label">Suhbatlar tarixi</div>
+                <div id="chat-history-list" class="history-list">
+                    <!-- History items injected here -->
+                    <div class="history-empty">Tarix mavjud emas</div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="status-badge" id="api-status">
+                    <span class="status-dot"></span>
+                    <span id="status-display-text">Server holati</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="main-content">
+            <header class="top-nav">
+                <div class="nav-left">
+                    <button class="menu-btn" id="sidebar-open-btn">☰</button>
+                    <h1>Yordamchi Bot</h1>
+                </div>
+                <div class="nav-actions">
+                    <select id="language-select" class="select-premium">
                         <option value="uz">🇺🇿 O'zbek</option>
                         <option value="ru">🇷🇺 Русский</option>
                         <option value="en">🇬🇧 English</option>
                     </select>
+                    <button id="theme-toggle" class="icon-btn-utility" title="Mavzuni o'zgartirish">
+                        <span class="icon-theme">🌙</span>
+                    </button>
                 </div>
-                <div class="status">
-                    <span id="status-indicator" class="status-dot"></span>
-                    <span id="status-text">Ishga tushmoqda...</span>
-                </div>
-            </div>
-        </div>
-        <div id="chat-box">
-            <div id="messages">
-                <!-- Greeting will be set by JavaScript based on selected language -->
-            </div>
-        </div>
-        <div class="input-container">
-            <input type="text" id="user-input" placeholder="Savolingizni yozing..." autocomplete="off">
-            <button id="send-button">Yuborish</button>
-        </div>
-        <div id="suggested-questions" class="suggested-container">
-            <!-- Suggested questions will be injected here -->
-        </div>
-        <div id="loading" class="loading hidden">
-            <div class="spinner"></div>
-            <span>Model javob tayyorlamoqda...</span>
-        </div>
-    </div>
-    
-    <!-- Document Upload Modal -->
-    <div id="doc-upload-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>📄 Hujjat yuklash</h2>
-                <button class="modal-close" id="modal-close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="upload-section">
-                    <h3>Fayl yuklash</h3>
-                    <div class="file-input-wrapper">
-                        <input type="file" id="file-input" accept=".pdf,.docx,.doc,.txt" />
-                        <label for="file-input" class="file-label">
-                            <span id="file-name">📁 Fayl tanlash</span>
-                        </label>
+            </header>
+
+            <div class="chat-viewport" id="chat-box">
+                <!-- Welcome Hero (Shown on empty chat) -->
+                <div class="welcome-hero" id="welcome-screen">
+                    <div class="hero-icon">💠</div>
+                    <h2>UzSWLU Intelligent Assistant</h2>
+                    <p>O'zbekiston Davlat Jahon Tillari Universiteti bo'yicha barcha savollaringizga javob beraman.</p>
+
+                    <div id="suggested-questions-hero" class="suggested-grid">
+                        <!-- Suggestions will be injected here -->
                     </div>
-                    <p class="hint">PDF, Word yoki Text fayl (max 10MB)</p>
                 </div>
-                
-                <div class="divider">YO'KI</div>
-                
-                <div class="upload-section">
-                    <h3>URL manzil</h3>
-                    <input type="url" id="url-input" placeholder="https://example.com/document" />
-                    <p class="hint">Veb-sahifa URL manzilini kiriting</p>
+
+                <div id="messages" class="messages-container">
+                    <!-- Messages will be injected here -->
                 </div>
-                
-                <div class="upload-section">
-                    <h3>Hujjat nomi</h3>
-                    <input type="text" id="doc-title" placeholder="Hujjat nomi" required />
-                </div>
-                
-                <div class="upload-section">
-                    <h3>Tavsif (ixtiyoriy)</h3>
-                    <textarea id="doc-description" placeholder="Qisqacha tavsif..." rows="3"></textarea>
-                </div>
-                
-                <div class="upload-actions">
-                    <button id="upload-btn" class="btn-primary">📤 Yuklash</button>
-                    <button id="cancel-btn" class="btn-secondary">Bekor qilish</button>
-                </div>
-                
-                <div id="upload-progress" class="upload-progress hidden">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progress-fill"></div>
-                    </div>
-                    <p id="upload-status">Yuklanmoqda...</p>
+
+                <div id="loading" class="loading-indicator hidden">
+                    <div class="dot-typing"></div>
+                    <span>Bot javob tayyorlamoqda...</span>
                 </div>
             </div>
-        </div>
+
+            <footer class="input-area">
+                <div class="input-wrapper-premium">
+                    <textarea id="user-input" rows="1" placeholder="Savolingizni yozing..."
+                        autocomplete="off"></textarea>
+                    <button id="send-button" class="btn-send-premium" title="Yuborish">
+                        <svg viewBox="0 0 24 24" width="24" height="24">
+                            <path fill="currentColor" d="M2,21L23,12L2,3V10L17,12L2,14V21Z" />
+                        </svg>
+                    </button>
+                </div>
+                <p class="bot-disclaimer">AI xato qilishi mumkin. Muhim ma'lumotlarni rasmiy manbalardan tekshiring.</p>
+            </footer>
+        </main>
     </div>
-    
+
+    <!-- Initialization and Logic -->
     <script src="script.js"></script>
 </body>
+
 </html>

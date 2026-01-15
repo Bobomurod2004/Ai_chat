@@ -459,11 +459,14 @@ class DocumentRAGIntegration:
         from rag_service import RAGService
         from django.utils import timezone
         import os
+        from langdetect import detect
         
         try:
-            if document.file:
-                file_path = document.file.path
-                doc_type = document.doc_type
+            if document.file_path:
+                file_path = document.file_path.path
+                # Map source_type to what processor expects
+                doc_type_map = {'pdf': 'pdf', 'doc': 'word', 'text': 'text', 'html': 'text'}
+                doc_type = doc_type_map.get(document.source_type, 'text')
                 
                 # File path'ni tekshirish
                 if not os.path.exists(file_path):
@@ -478,12 +481,12 @@ class DocumentRAGIntegration:
                 return {
                     'success': False,
                     'chunks_created': 0,
-                    'error': 'Fayl topilmadi'
+                    'error': 'Fayl yo\'li topilmadi'
                 }
             
             print(f"📄 Hujjat qayta ishlanmoqda: {document.title} ({doc_type})")
-            print(f"📄 File path: {file_path}")
-            print(f"📄 File exists: {os.path.exists(file_path)}")
+            document.status = 'processing'
+            document.save(update_fields=['status'])
             
             # Process file
             result = self.processor.process_file(file_path, doc_type)
@@ -505,141 +508,71 @@ class DocumentRAGIntegration:
                     'error': 'Chunk yaratilmadi - fayl bo\'sh yoki qayta ishlab bo\'lmaydi'
                 }
             
+            # Detect language if not explicitly set to something other than default 'uz'
+            full_text = result['text']
+            try:
+                detected_lang = detect(full_text[:2000])
+                if detected_lang in ['uz', 'ru', 'en']:
+                    document.lang = detected_lang
+                    print(f"🌐 Aniqlangan til: {detected_lang}")
+            except:
+                print("⚠️ Tilni aniqlab bo'lmadi, default 'uz' qoldiriladi")
+            
             print(f"✅ {len(chunks)} ta chunk yaratildi")
             
             # Store in ChromaDB
             print(f"💾 ChromaDB ga saqlanmoqda...")
             rag = RAGService()
             
-            # Delete old chunks for this document
+            # Delete old chunks for this document from Chroma
             try:
-                print(f"🗑️ Eski chunk'larni tekshirilmoqda...")
                 existing = rag.collection.get(
                     where={"document_id": str(document.id)}
                 )
                 if existing and existing['ids']:
                     rag.collection.delete(ids=existing['ids'])
-                    print(f"🗑️ {len(existing['ids'])} ta eski chunk o'chirildi")
-                else:
-                    print(f"ℹ️ Eski chunk'lar topilmadi")
+                    print(f"🗑️ {len(existing['ids'])} ta eski chunk ChromaDB'dan o'chirildi")
             except Exception as e:
-                import traceback
-                print(f"⚠️ Eski chunk'larni o'chirishda xatolik (ehtimol yo'q): {e}")
-                print(f"Traceback: {traceback.format_exc()}")
+                print(f"⚠️ Eski chunk'larni o'chirishda xatolik: {e}")
             
-            # Add new chunks
-            try:
-                print(f"➕ {len(chunks)} ta chunk qo'shilmoqda...")
-                ids = [f"doc_{document.id}_chunk_{i}" for i in range(len(chunks))]
-                metadatas = [{
-                    'document_id': str(document.id),
-                    'document_title': document.title,
-                    'chunk_index': i,
-                    'source': 'document',
-                    'doc_type': doc_type
-                } for i in range(len(chunks))]
-                
-                # Retry mechanism - agar embedding model yuklashda xatolik bo'lsa
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        rag.collection.add(
-                            documents=chunks,
-                            metadatas=metadatas,
-                            ids=ids
-                        )
-                        print(f"✅ {len(chunks)} ta chunk ChromaDB ga qo'shildi: '{document.title}'")
-                        
-                        # Store metadata in PostgreSQL
-                        from chatbot_app.models import DocumentChunk
-                        # Delete old metadata
-                        DocumentChunk.objects.filter(document=document).delete()
-                        
-                        # Create new metadata
-                        chunk_objs = [
-                            DocumentChunk(
-                                document=document,
-                                chunk_index=i,
-                                chroma_id=ids[i],
-                                char_count=len(chunks[i]),
-                                title=document.title
-                            ) for i in range(len(chunks))
-                        ]
-                        DocumentChunk.objects.bulk_create(chunk_objs)
-                        print(f"✅ {len(chunks)} ta chunk metadata PostgreSQL ga qo'shildi")
-                        break  # Muvaffaqiyatli
-                    except Exception as add_error:
-                        error_msg = str(add_error)
-                        if "Compressed file ended" in error_msg or "EOFError" in error_msg or "INVALID_PROTOBUF" in error_msg or "Protobuf parsing failed" in error_msg:
-                            # Embedding model cache'ini tozalash
-                            print(f"⚠️ Embedding model cache'ida muammo (attempt {attempt + 1}/{max_retries})")
-                            if attempt < max_retries - 1:
-                                # ChromaDB ONNX model cache'ini tozalash
-                                try:
-                                    import shutil
-                                    cache_paths = [
-                                        "/root/.cache/chroma/onnx_models",
-                                        os.path.expanduser("~/.cache/chroma/onnx_models"),
-                                        "/root/.cache/huggingface",
-                                        os.path.expanduser("~/.cache/huggingface"),
-                                        "/root/.cache/sentence_transformers",
-                                        os.path.expanduser("~/.cache/sentence_transformers")
-                                    ]
-                                    for cache_path in cache_paths:
-                                        if os.path.exists(cache_path):
-                                            print(f"🗑️ Cache tozalanmoqda: {cache_path}")
-                                            try:
-                                                shutil.rmtree(cache_path)
-                                                print(f"✅ O'chirildi: {cache_path}")
-                                            except Exception as rm_error:
-                                                print(f"⚠️ O'chirishda xatolik: {rm_error}")
-                                                # Agar to'liq o'chirib bo'lmasa, ichidagi fayllarni o'chirish
-                                                try:
-                                                    for item in os.listdir(cache_path):
-                                                        item_path = os.path.join(cache_path, item)
-                                                        if os.path.isdir(item_path):
-                                                            try:
-                                                                shutil.rmtree(item_path)
-                                                                print(f"✅ O'chirildi: {item}")
-                                                            except:
-                                                                pass
-                                                except:
-                                                    pass
-                                except Exception as cache_error:
-                                    print(f"⚠️ Cache tozalashda xatolik: {cache_error}")
-                                
-                                import time
-                                time.sleep(3)  # Kichik kechikish - cache tozalanadi
-                            else:
-                                # Oxirgi urinish - xatolikni tashlash
-                                raise
-                        else:
-                            # Boshqa xatolik - darhol tashlash
-                            raise
-            except Exception as e:
-                import traceback
-                error_trace = traceback.format_exc()
-                print(f"❌ ChromaDB ga saqlashda xatolik: {e}")
-                print(f"Traceback: {error_trace}")
-                raise  # Xatolikni yuqoriga tashlash
+            # Add new chunks to Chroma
+            ids = [f"doc_{document.id}_chunk_{i}" for i in range(len(chunks))]
+            metadatas = [{
+                'document_id': str(document.id),
+                'title': document.title,
+                'chunk_index': i,
+                'source': 'document',
+                'lang': document.lang,
+                'type': 'document'
+            } for i in range(len(chunks))]
             
-            # Document status'ni yangilash (admin.py'da ham yangilanadi, lekin bu yerda ham yangilaymiz)
-            # Bu yerda yangilash kerak, chunki admin.py'da refresh_from_db() dan keyin yangilanadi
-            try:
-                print(f"💾 Document status yangilanmoqda...")
-                document.refresh_from_db()
-                document.status = 'completed'
-                document.chunks_created = len(chunks)
-                document.processed_at = timezone.now()
-                document.error_message = ''
-                document.save(update_fields=['status', 'chunks_created', 'processed_at', 'error_message'])
-                print(f"✅ Document status yangilandi: completed")
-            except Exception as e:
-                import traceback
-                error_trace = traceback.format_exc()
-                print(f"❌ Document status yangilashda xatolik: {e}")
-                print(f"Traceback: {error_trace}")
-                raise  # Xatolikni yuqoriga tashlash
+            rag.collection.add(
+                documents=chunks,
+                metadatas=metadatas,
+                ids=ids
+            )
+            print(f"✅ {len(chunks)} ta chunk ChromaDB ga qo'shildi")
+            
+            # Store metadata and text in PostgreSQL
+            from chatbot_app.models import DocumentChunk
+            DocumentChunk.objects.filter(document=document).delete()
+            
+            chunk_objs = [
+                DocumentChunk(
+                    document=document,
+                    chunk_index=i,
+                    embedding_id=ids[i],
+                    chunk_text=chunks[i],
+                    lang=document.lang,
+                    metadata={'title': document.title, 'index': i}
+                ) for i in range(len(chunks))
+            ]
+            DocumentChunk.objects.bulk_create(chunk_objs)
+            print(f"✅ {len(chunks)} ta chunk metadata PostgreSQL ga saqlandi")
+            
+            # Update Document status
+            document.status = 'ready'
+            document.save(update_fields=['status', 'lang'])
             
             return {
                 'success': True,
@@ -649,17 +582,10 @@ class DocumentRAGIntegration:
             
         except Exception as e:
             import traceback
-            error_trace = traceback.format_exc()
-            print(f"❌ Hujjat qayta ishlashda xatolik: {e}")
-            print(f"Traceback: {error_trace}")
+            print(f"❌ Hujjat qayta ishlashda xatolik: {e}\n{traceback.format_exc()}")
             
-            # Xatolikni saqlash
-            try:
-                document.status = 'failed'
-                document.error_message = str(e)[:500]  # Limit error message length
-                document.save()
-            except:
-                pass
+            document.status = 'failed'
+            document.save(update_fields=['status'])
             
             return {
                 'success': False,
