@@ -8,7 +8,7 @@ from django.utils import timezone
 from .models import (
     Category, FAQ, FAQTranslation, DynamicInfo,
     Conversation, Message, Document, DocumentChunk,
-    SearchLog, Feedback
+    Feedback
 )
 
 
@@ -114,13 +114,6 @@ class DocumentChunkAdmin(admin.ModelAdmin):
     search_fields = ['chunk_text']
 
 
-@admin.register(SearchLog)
-class SearchLogAdmin(admin.ModelAdmin):
-    list_display = ['query_short', 'lang', 'found_type', 'latency_ms', 'created_at']
-    list_filter = ['lang', 'found_type']
-    
-    def query_short(self, obj):
-        return obj.query[:50]
 
 
 @admin.register(Feedback)

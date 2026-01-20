@@ -32,3 +32,9 @@ db.sqlite3-journal
 # OS
 .DS_Store
 Thumbs.db
+
+
+# Security and Cache
+.env
+__pycache__/
+*.pyc

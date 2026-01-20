@@ -114,3 +114,10 @@ yarn-error.log
 *.exe
 *.o
 *.so
+
+
+# Security
+.env
+backend/.env
+__pycache__/
+*.pyc

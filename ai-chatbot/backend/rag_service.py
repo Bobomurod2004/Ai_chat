@@ -166,7 +166,9 @@ class RAGService:
                     'trans_id': trans.id,
                     'lang': trans.lang,
                     'category': trans.faq.category.name if trans.faq.category else 'General',
-                    'type': 'faq'
+                    'type': 'faq',
+                    'is_current': trans.faq.is_current,
+                    'year': trans.faq.year
                 })
                 ids.append(f"faq_trans_{trans.id}")
             
@@ -183,22 +185,35 @@ class RAGService:
         """Search FAQ translations from PostgreSQL using Full-Text Search on search_tsv."""
         try:
             from chatbot_app.models import FAQTranslation
-            from django.contrib.postgres.search import SearchQuery, SearchRank
-            from django.db.models import F
+            from django.contrib.postgres.search import SearchQuery, SearchRank, TrigramSimilarity
+            from django.db.models import F, Value
+
+            # Language to Postgres Search Config mapping
+            lang_configs = {
+                'uz': 'simple',
+                'en': 'english',
+                'ru': 'russian'
+            }
+            search_config = lang_configs.get(lang_code, 'simple')
             
-            # Using split FTS vectors with websearch for the most natural query parsing
-            search_query = SearchQuery(query_text, config='simple', search_type='websearch')
-            
-            # 1. Search in target language with DUAL VECTOR RANKING
-            # Question matches weighted 2.5x higher than answer matches
+            # Define search_query for FTS using language-specific config
+            search_query = SearchQuery(query_text, config=search_config, search_type='plain')
+
+            # Hybrid Search Ranking: 
+            # - Exact/Stemmed Keyword Match (FTS)
+            # - Fuzzy Keyword Match (Trigram Similarity)
+            # - High weight to Question, slightly lower to Answer
             trans_results = FAQTranslation.objects.filter(
                 lang=lang_code,
                 faq__status='published'
             ).annotate(
                 q_rank=SearchRank(F('question_tsv'), search_query),
                 a_rank=SearchRank(F('answer_tsv'), search_query),
-                rank=(F('q_rank') * 2.5 + F('a_rank'))
-            ).filter(rank__gte=0.01).order_by('-rank')[:limit]
+                q_sim=TrigramSimilarity('question', query_text),
+                a_sim=TrigramSimilarity('answer', query_text),
+                # Hybrid score calculation (Higher weighting for exact matches and trigrams in questions)
+                rank=(F('q_rank') * 2.0 + F('a_rank') * 0.5 + F('q_sim') * 3.0 + F('a_sim') * 1.0)
+            ).filter(rank__gte=0.1).order_by('-rank')[:limit]
             
             results = []
             for trans in trans_results:
@@ -226,9 +241,11 @@ class RAGService:
                     'question': trans.question,
                     'answer': trans.answer,
                     'category': trans.faq.category.name if trans.faq.category else 'General',
-                    'relevance': min(1.0, float(trans.rank) * boost),
+                    'relevance': min(1.0, float(trans.rank) * boost * (1.2 if trans.faq.is_current else 0.8)),
                     'source': 'db_fts',
-                    'lang': trans.lang
+                    'lang': trans.lang,
+                    'is_current': trans.faq.is_current,
+                    'year': trans.faq.year
                 })
             
             # 2. Fallback search (if no results in target language, try others)
@@ -238,8 +255,10 @@ class RAGService:
                 ).exclude(lang=lang_code).annotate(
                     q_rank=SearchRank(F('question_tsv'), search_query),
                     a_rank=SearchRank(F('answer_tsv'), search_query),
-                    rank=(F('q_rank') * 2.5 + F('a_rank'))
-                ).filter(rank__gte=0.05).order_by('-rank')[:limit]
+                    q_sim=TrigramSimilarity('question', query_text),
+                    a_sim=TrigramSimilarity('answer', query_text),
+                    rank=(F('q_rank') * 2.0 + F('a_rank') * 0.5 + F('q_sim') * 3.0 + F('a_sim') * 1.0)
+                ).filter(rank__gte=0.1).order_by('-rank')[:limit]
                 
                 for trans in other_trans:
                     results.append({
@@ -314,7 +333,9 @@ class RAGService:
                     'category': meta.get('category', 'General'),
                     'faq_id': meta.get('faq_id'),
                     'lang': meta.get('lang'),
-                    'similarity': similarity,
+                    'similarity': similarity * (1.1 if meta.get('is_current', True) else 0.9),
+                    'is_current': meta.get('is_current', True),
+                    'year': meta.get('year', 2024),
                     'source': meta.get('source', 'semantic')
                 })
         
@@ -323,26 +344,49 @@ class RAGService:
     def retrieve_with_sources(self, question: str, lang_code: str = 'uz', top_k: int = 5) -> Dict[str, Any]:
         """
         Prioritized retrieval with language support.
+        1. Intent-Based Filtering & Category Matching
+        2. Database FTS Search (with FAQ boosting)
+        3. ChromaDB Semantic Search
+        4. Rule-Based Reranking
         """
-        # 1. Database FTS Search
+        # --- 1. Intent Detection ---
+        intent_category = None
+        q_lower = question.lower()
+        
+        # Simple keywords for intent matching
+        intents = {
+            'Talaba hayoti': ['yotoqxona', 'hostel', 'turar joy', 'student life'],
+            'Qabul': ['qabul', 'admission', 'hujjat topshirish', 'imtihon'],
+            'Kontrakt': ['kontrakt', 'to\'lov', 'payment', 'tuition'],
+            'Magistratura': ['magistr', 'master', 'postgraduate']
+        }
+        
+        for cat, keywords in intents.items():
+            if any(kw in q_lower for kw in keywords):
+                intent_category = cat
+                break
+
+        # --- 2. Database FTS Search ---
         db_results = self.search_database(question, lang_code=lang_code, limit=top_k)
         
-        # High confidence check
-        if db_results and db_results[0]['relevance'] >= 0.8:
+        # High confidence check (Direct Match)
+        if db_results and db_results[0]['relevance'] >= 0.5:
             best = db_results[0]
-            return {
-                'context': f"[{best['category']}]\n{best['answer']}",
-                'top_answer': best['answer'],
-                'top_question': best['question'],
-                'sources': [{
-                    'title': best['question'],
-                    'category': best['category'],
-                    'source_type': 'faq',
-                    'relevance': 100,
-                    'faq_id': best['faq_id']
-                }],
-                'total_found': len(db_results)
-            }
+            # Verify category if intent found
+            if not intent_category or best['category'] == intent_category:
+                return {
+                    'context': f"[{best['category']}]\n{best['answer']}",
+                    'top_answer': best['answer'],
+                    'top_question': best['question'],
+                    'sources': [{
+                        'title': best['question'],
+                        'category': best['category'],
+                        'source_type': 'faq',
+                        'relevance': 100,
+                        'faq_id': best['faq_id']
+                    }],
+                    'total_found': len(db_results)
+                }
         
         # 2. ChromaDB Semantic Search
         semantic_results = self.search_chromadb(question, lang_code=lang_code, top_k=top_k)
@@ -350,14 +394,20 @@ class RAGService:
         merged_results = []
         seen_faq_ids = set()
         
-        # Add DB results
+        # Add DB results (FAQ Boosting: multiply score by 1.25)
         for r in db_results:
+            confidence = r['relevance'] * 1.25
+            
+            # Boost if category matches intent
+            if intent_category and r['category'] == intent_category:
+                confidence *= 1.2
+
             seen_faq_ids.add(r['faq_id'])
             merged_results.append({
                 'text': r['answer'],
                 'title': r['question'],
                 'category': r['category'],
-                'confidence': r['relevance'],
+                'confidence': min(0.99, confidence),
                 'source_type': 'faq',
                 'faq_id': r['faq_id']
             })
@@ -366,19 +416,43 @@ class RAGService:
         for r in semantic_results:
             if r['faq_id'] and r['faq_id'] in seen_faq_ids:
                 continue
+            
+            confidence = r['similarity']
+            # Boost if category matches intent
+            if intent_category and r['category'] == intent_category:
+                confidence *= 1.2
+            # Penalize if intent category exists but result is NOT in it (Filtering)
+            elif intent_category and r['category'] != intent_category:
+                confidence *= 0.5
+
             merged_results.append({
                 'text': r['text'],
                 'title': r['title'],
                 'category': r['category'],
-                'confidence': r['similarity'],
+                'confidence': min(0.99, confidence),
                 'source_type': 'semantic',
                 'faq_id': r['faq_id']
             })
             
         merged_results.sort(key=lambda x: x['confidence'], reverse=True)
-        top_results = merged_results[:top_k]
         
-        context = "\n\n".join([f"[{r['category']}]\n{r['text']}" for r in top_results])
+        # --- 4. Rule-Based Reranking ---
+        # If we have a high-confidence FAQ (>0.75), prioritize it and limit other docs
+        has_high_conf_faq = any(r['source_type'] == 'faq' and r['confidence'] > 0.75 for r in merged_results)
+        
+        if has_high_conf_faq:
+            top_results = [r for r in merged_results if r['confidence'] >= 0.15]
+        else:
+            top_results = [r for r in merged_results if r['confidence'] >= 0.15]
+
+        top_results = top_results[:top_k]
+        
+        context_blocks = []
+        for r in top_results:
+            source_tag = f"FAQ #{r['faq_id']}" if r['source_type'] == 'faq' else f"Hujjat: {r['title']}"
+            context_blocks.append(f"MANBA: {source_tag}\nMATN: {r['text']}")
+        
+        context = "\n---\n".join(context_blocks)
         sources = [{
             'title': r['title'],
             'category': r['category'],

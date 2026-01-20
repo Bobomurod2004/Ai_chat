@@ -22,6 +22,16 @@ class ChatbotResponseViewSet(viewsets.ViewSet):
     permission_classes = [AllowAny]
     rag_service = RAGService()
 
+
+    def _get_history_text(self, conversation, limit=5):
+        """Format recent chat history for the agent."""
+        messages = conversation.messages.all().order_by('-created_at')[:limit]
+        history = []
+        for msg in reversed(messages):
+            role = "User" if msg.sender_type == 'user' else "Assistant"
+            history.append(f"{role}: {msg.text}")
+        return "\n".join(history)
+
     @action(detail=False, methods=['get'])
     def health(self, request):
         """Service health check."""
@@ -80,8 +90,14 @@ class ChatbotResponseViewSet(viewsets.ViewSet):
             
             full_response = ""
             
-            # Stream from Ollama
-            for chunk in ollama_client.generate_stream(user_query, context=context, language=lang_code):
+            # History and Stream from Ollama
+            history = self._get_history_text(conv)
+            for chunk in ollama_client.generate_stream(
+                user_query, 
+                context=context, 
+                history=history,
+                language=lang_code
+            ):
                 full_response += chunk
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
             
@@ -228,8 +244,3 @@ class DocumentViewSet(viewsets.ModelViewSet):
     serializer_class = DocumentSerializer
     permission_classes = [AllowAny]
 
-# Constants needed for context
-INTENT_MAP = {
-    "tuition": ["kontrakt", "to'lov", "shartnoma", "pul", "narx", "cost", "price"],
-    "admission": ["qabul", "hujjat", "topshirish", "kirish"],
-}

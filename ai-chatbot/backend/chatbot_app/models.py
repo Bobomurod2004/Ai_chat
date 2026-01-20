@@ -19,6 +19,7 @@ class Category(models.Model):
     icon = models.CharField(max_length=50, blank=True, help_text="Emoji yoki icon nomi")
     order = models.PositiveIntegerField(default=0, help_text="Tartib raqami")
     is_active = models.BooleanField(default=True)
+    intent_keywords = models.JSONField(default=list, blank=True, help_text="Keywords to trigger this category intent")
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -45,6 +46,8 @@ class FAQ(models.Model):
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='faqs')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='published')
     order = models.PositiveIntegerField(default=0)
+    is_current = models.BooleanField(default=True, help_text="Is this information up to date?")
+    year = models.PositiveIntegerField(default=2024, help_text="The year this information applies to")
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -74,7 +77,6 @@ class FAQTranslation(models.Model):
     question = models.TextField()
     answer = models.TextField()
     question_variants = models.JSONField(default=list)
-    short_answer = models.CharField(max_length=255, blank=True)
     embedding_id = models.CharField(max_length=100, blank=True)
     
     # PostgreSQL Full-Text Search fields
@@ -87,7 +89,7 @@ class FAQTranslation(models.Model):
         unique_together = ['faq', 'lang']
         indexes = [
             models.Index(fields=['lang']),
-            GinIndex(fields=['question_tsv']), 
+            GinIndex(fields=['question_tsv']),
             GinIndex(fields=['answer_tsv']),
         ]
     
@@ -120,6 +122,8 @@ class Document(models.Model):
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded')
     version = models.PositiveIntegerField(default=1)
+    is_current = models.BooleanField(default=True)
+    year = models.PositiveIntegerField(default=2024)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -164,6 +168,7 @@ class DynamicInfo(models.Model):
     value = models.TextField()
     description = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
+    intent_keywords = models.JSONField(default=list, blank=True, help_text="Keywords to trigger this dynamic info")
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
@@ -220,28 +225,6 @@ class Message(models.Model):
         return f"{self.sender_type}: {self.text[:50]}"
 
 
-class SearchLog(models.Model):
-    """
-    Audit log for searches to track performance and missing content.
-    """
-    FOUND_TYPE_CHOICES = [
-        ('faq', 'FAQ'),
-        ('doc', 'Document'),
-        ('none', 'Not Found'),
-    ]
-    
-    query = models.TextField()
-    lang = models.CharField(max_length=2, choices=FAQTranslation.LANGUAGE_CHOICES, default='uz')
-    found_type = models.CharField(max_length=10, choices=FOUND_TYPE_CHOICES, default='none')
-    latency_ms = models.PositiveIntegerField(help_text="Search latency in milliseconds", default=0)
-    
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    class Meta:
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"{self.lang} | {self.found_type} | {self.query[:50]}"
 
 
 class Feedback(models.Model):

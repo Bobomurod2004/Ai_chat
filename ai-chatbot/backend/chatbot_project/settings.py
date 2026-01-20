@@ -198,9 +198,9 @@ CSRF_TRUSTED_ORIGINS = [
 
 # Ollama Configuration
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
-# SPEED OPTIMIZED: qwen2.5:1.5b - tez (8s), yaxshi sifat
+# SPEED OPTIMIZED: qwen2.5:3b - tez va yaxshi sifat
 # uzswlu:latest - custom fine-tuned (20s) | mistral - aniq (30s+)
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5:1.5b')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5:3b')
 
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
