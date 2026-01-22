@@ -38,7 +38,9 @@ const translations = {
             { category: 'Fakultetlar', q: 'Qanday fakultetlar bor?' },
             { category: 'Aloqa', q: 'Rektor bilan qanday bog\'lansa bo\'ladi?' }
         ],
-        greeting: 'Salom! Men UzSWLU AI asistentiman. Sizga qanday yordam bera olaman?'
+        greeting: 'Salom! Men UzSWLU AI asistentiman. Sizga qanday yordam bera olaman?',
+        error_network: 'Tarmoq xatosi: Server bilan aloqa uzildi.',
+        error_api: 'Xatolik yuz berdi: Bot hozirda javob bera olmaydi.'
     },
     ru: {
         welcome_title: 'UzSWLU Intelligent Assistant',
@@ -59,7 +61,9 @@ const translations = {
             { category: 'Факультеты', q: 'Какие есть факультеты?' },
             { category: 'Контакт', q: 'Как связаться с ректором?' }
         ],
-        greeting: 'Здравствуйте! Я AI-ассистент УзГУМЯ. Чем я могу вам помочь?'
+        greeting: 'Здравствуйте! Я AI-ассистент УзГУМЯ. Чем я могу вам помочь?',
+        error_network: 'Ошибка сети: связь с сервером прервана.',
+        error_api: 'Произошла ошибка: бот не может ответить в данный момент.'
     },
     en: {
         welcome_title: 'UzSWLU Intelligent Assistant',
@@ -80,7 +84,9 @@ const translations = {
             { category: 'Faculties', q: 'What faculties are there?' },
             { category: 'Contact', q: 'How to contact the rector?' }
         ],
-        greeting: 'Hello! I am the UzSWLU AI assistant. How can I help you today?'
+        greeting: 'Hello! I am the UzSWLU AI assistant. How can I help you today?',
+        error_network: 'Network error: connection to server lost.',
+        error_api: 'An error occurred: the bot cannot respond right now.'
     }
 };
 
@@ -282,15 +288,16 @@ async function sendMessage() {
                         }
 
                         if (data.error) {
-                            contentDiv.innerHTML = `<p style="color: #ef4444">Xatolik yuz berdi: ${data.error}</p>`;
+                            contentDiv.innerHTML = `<div class="error-msg">${data.error}</div>`;
                         }
                     } catch (e) { console.error("JSON Parse Error", e); }
                 }
             }
         }
     } catch (err) {
+        console.error("Chat Error:", err);
         loadingEl.classList.add('hidden');
-        contentDiv.innerHTML = `<p style="color: #ef4444">Xatolik: Tarmoq bilan muammo yuz berdi.</p>`;
+        contentDiv.innerHTML = `<div class="error-msg">${translations[currentLanguage].error_network}</div>`;
     }
 }
 

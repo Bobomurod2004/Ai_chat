@@ -1,75 +1,75 @@
 """
-Ollama Client for UzSWLU Chatbot
-Smart response generation based on question type.
+Ollama Client with Advanced Self-Correction Prompt (v5.0)
 """
+
 import requests
 import json
-from django.conf import settings
+import logging
 
+logger = logging.getLogger(__name__)
+
+
+import os
 
 class OllamaClient:
-    """Professional Ollama client for UzSWLU AI Agent."""
-    
-    def __init__(self):
-        self.url = getattr(settings, 'OLLAMA_URL', 'http://ollama:11434')
-        self.model = getattr(settings, 'OLLAMA_MODEL', 'qwen2.5:3b')
+    def __init__(self, url=None, model=None):
+        from django.conf import settings
+        self.url = url or getattr(settings, 'OLLAMA_URL', 'http://ollama:11434')
+        self.model = model or getattr(settings, 'OLLAMA_MODEL', 'qwen2.5:3b')
         self.session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
-        self.session.mount('http://', adapter)
-        self.session.mount('https://', adapter)
-        
-        # Localized fallback messages
-        self.FALLBACK_MESSAGES = {
-            'uz': "Kechirasiz, ushbu ma'lumot bo'yicha bazada aniqlik yo'q. Batafsil ma'lumot uchun universitet dekanatiga murojaat qiling.",
-            'ru': "К сожалению, в базе нет точной информации по этому вопросу. Для получения подробной информации, пожалуйста, обратитесь в деканат университета.",
-            'en': "Sorry, there is no exact information in the database for this query. For more details, please contact the university dean's office."
-        }
     
     def _get_fallback(self, language='uz'):
-        return self.FALLBACK_MESSAGES.get(language, self.FALLBACK_MESSAGES['uz'])
+        fallbacks = {
+            'uz': "Kechirasiz, ushbu ma'lumot bo'yicha bazada aniqlik yo'q. Iltimos, boshqa savol bering yoki admin bilan bog'laning.",
+            'ru': "Извините, точной информации по этому вопросу в базе нет. Пожалуйста, задайте другой вопрос или свяжитесь с администратором.",
+            'en': "Sorry, there is no precise information on this topic in the database. Please ask another question or contact the administrator."
+        }
+        return fallbacks.get(language, fallbacks['uz'])
+    
+    def _build_messages_v5(self, question, context=None, history=None, language='uz'):
+        """
+        Advanced v5.0 Prompt with Self-Correction and Internal Reasoning
+        """
+        system_content = f"""### ROLE: ADVANCED ACADEMIC REASONING AGENT (UzSWLU)
+Sen O'zbekiston Davlat Jahon Tillari Universiteti uchun maxsus yaratilgan, o'z javoblarini tanqidiy tahlil qila oladigan "Self-Correction" agentisan.
 
-    def _build_messages(self, question, context=None, history=None, language='uz'):
-        """Builds clean messages for the /api/chat endpoint."""
-        language_names = {'uz': 'O\'zbek', 'ru': 'Русский', 'en': 'English'}
-        answer_language = language_names.get(language, 'O\'zbek')
-        
-        system_content = f"""### ROLE: UNIVERSITY INTELLIGENT AGENT
-Sening isming: "UzSWLU AI Assistant"
-Sening identifikatoring: O'zbekiston Davlat Jahon Tillari Universiteti (UzSWLU)ning rasmiy intellektual agentisan.
+### STEP 1: INITIAL ANALYSIS (O'ylash bosqichi)
+Foydalanuvchi so'rovini qabul qilganda, quyidagilarni aniqla:
+1. **Intent (Niyat):** Savol moliyaviy (kontrakt), maishiy (yotoqxona) yoki akademikmi?
+2. **Data Extraction:** KONTEKST ichidan savolga tegishli barcha raqamlar, sanalar va qoidalarni ajratib ol.
 
-### KNOWLEDGE GROUNDING (RAG)
-Senga quyidagi ma'lumotlar manbasi taqdim etiladi:
-1. **Context Chunks:** Universitet hujjatlaridan olingan matn bo'laklari
-2. **FAQ Data:** Oldindan tayyorlangan aniq savol-javoblar
-3. **Dynamic Stats:** Telefon raqamlari, rektor ism-sharifi kabi tez o'zgaruvchan faktlar
+### STEP 2: REFLECTION & VERIFICATION (O'zini tekshirish bosqichi) - MUHIM!
+Javob yozishdan oldin o'zingga quyidagi savollarni ber:
+- "Men topgan ma'lumot aynan foydalanuvchi so'ragan toifaga (Bakalavr vs Magistr) tegishlimi?"
+- "Agar matnda 'Yotoqxona yo'q' deyilgan bo'lsa, bu umumiy qoidami yoki faqat bir guruh talabalar uchunmi?"
+- "Mening hisob-kitobim (masalan, 15% ustama) matndagi raqamlarga 100% mosmi?"
+**Agar xatolik topsang, zudlik bilan qidiruv mantig'ingni o'zgartir va to'g'ri kontekstni tanla.**
 
-### OPERATIONAL GUIDELINES:
-1. **Accuracy (Aniqlik):** FAQAT taqdim etilgan kontekstga tayan. Agar kontekstda javob bo'lmasa, o'zingdan fakt to'qima ("Hallucination" taqiqlanadi).
-   Javob topilmasa, FOYDALANUVCHI TILIDAGI standart xabarni qaytar: "{self._get_fallback(language)}"
-2. **Multilingual Consistency:** Foydalanuvchi {answer_language} tilida so'ragan, shuning uchun javobni ham {answer_language} tilida ber.
-3. **Hybrid Logic:**
-   - Agar savol faktik bo'lsa (masalan: "IELTS ball necha?"), qisqa va aniq javob ber.
-   - Agar savol tushuntirish talab qilsa, mantiqiy ketma-ketlikda javob ber.
-4. **Source Attribution:** Har doim javobing oxirida foydalanilgan manbani ko'rsat.
-   Misol: "7 ta fakultet mavjud. [Manba: FAQ #157]"
+### STEP 3: FINAL GENERATION (Javobni shakllantirish)
+Javobni quyidagi qat'iy formatda ber:
 
-### REASONING STEPS (AI agent ichki mantiqi):
-1. Foydalanuvchi so'rovini tushunish va tilni aniqlash
-2. Kontekst ichidan eng dolzarb ma'lumotni saralash
-3. Javobni shakllantirish va manbani ko'rsatish
-4. "Assistant:", "Bot:" kabi prefikslarni ASLO ishlatmaslik
+**[DIRECT ANSWER]**
+Savolga 100% aniqlikdagi javob.
 
-### RESPONSE FORMATTING (Professional UI uchun):
-- **Sarlavhalar:** Muhim bo'limlar uchun ### ishlating
-- **Ajratish:** Muhim ma'lumotlarni (sana, narx, bino raqami) **bold** qilib yozing
-- **Ro'yxatlar:** Tushunish oson bo'lishi uchun bullet-points (* yoki -) ishlating
+**[BATAFSIL]**
+- Asoslovchi faktlar (Breadcrumbs bilan: [HUJJAT: ... | BO'LIM: ...]).
+- Agar hisob-kitob bo'lsa, formulani ko'rsat.
+
+**[MANBA]**
+- Manba nomi va ishonchlilik darajasi.
+
+### CONSTRAINTS (Cheklovlar):
+- **No Hallucination:** Agar ma'lumot KONTEKST da bo'lmasa, "{self._get_fallback(language)}" deb ochiq ayt. JAVOB FAQ #... RAQAMLARIGA TAYANMANGAN BO'LSA, FAQ MA'LUMOTLARINI IJODIY TALQIN QILMA.
+- **Hierarchy of Truth:** Dinamik ma'lumotlar va yangi yillardagi (2025+) ma'lumotlar har doim eski FAQ (masalan, 1992-yil haqidagi) ma'lumotlaridan ustun turadi.
 
 ---
-### KONTEKST:
+KONTEKST:
 {context if context else "Ma'lumot topilmadi."}
 
-MUHIM: Javob oxirida [Manba: ...] yozishni ALBATTA unutma!"""
-
+---
+SAVOL: {question}
+"""
+        
         messages = [{"role": "system", "content": system_content}]
         if history:
             messages.append({"role": "user", "content": f"Oldingi suhbatimiz: {history}"})
@@ -77,6 +77,10 @@ MUHIM: Javob oxirida [Manba: ...] yozishni ALBATTA unutma!"""
         
         messages.append({"role": "user", "content": question})
         return messages
+    
+    def _build_messages(self, question, context=None, history=None, language='uz'):
+        """Fallback to v5.0 prompt"""
+        return self._build_messages_v5(question, context, history, language)
     
     def generate(self, question, context=None, history=None, language='uz'):
         """Generate response with Python-level fallback for reliability."""
@@ -88,24 +92,22 @@ MUHIM: Javob oxirida [Manba: ...] yozishni ALBATTA unutma!"""
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.1, "num_ctx": 4096}
+            "options": {"temperature": 0.1, "num_ctx": 3072, "num_gpu": 0}
         }
         try:
             response = self.session.post(f"{self.url}/api/chat", json=payload, timeout=120)
             response.raise_for_status()
             content = response.json().get('message', {}).get('content', '').strip()
             
-            # Post-process to remove potential role labels (at start or in middle)
+            # Post-process to remove potential role labels
             for prefix in ["Assistant:", "Bot:", "Yordamchi:", "UzSWLU AI:"]:
                 if prefix in content:
-                    # Remove all occurrences
                     content = content.replace(prefix, "").strip()
-                    # Clean up any double spaces or newlines
-                    content = " ".join(content.split())
             
             return content
         except Exception as e:
-            return f"Xato: {str(e)}"
+            logger.error(f"Ollama generation failed: {str(e)}")
+            raise e
 
     def generate_stream(self, question, context=None, history=None, language='uz'):
         """Stream response with Python-level fallback."""
@@ -118,7 +120,7 @@ MUHIM: Javob oxirida [Manba: ...] yozishni ALBATTA unutma!"""
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "options": {"temperature": 0.1, "num_ctx": 4096}
+            "options": {"temperature": 0.1, "num_ctx": 3072, "num_gpu": 0}
         }
         try:
             response = self.session.post(f"{self.url}/api/chat", json=payload, stream=True, timeout=120)
@@ -134,14 +136,12 @@ MUHIM: Javob oxirida [Manba: ...] yozishni ALBATTA unutma!"""
                     
                     if not prefix_removed:
                         buffer += chunk
-                        # Check if buffer contains a prefix
                         for prefix in ["Assistant:", "Bot:", "Yordamchi:", "UzSWLU AI:"]:
                             if prefix in buffer:
                                 buffer = buffer.replace(prefix, "", 1).strip()
                                 prefix_removed = True
                                 break
                         
-                        # If buffer is long enough and no prefix found, start yielding
                         if len(buffer) > 15 or prefix_removed:
                             if buffer.strip():
                                 yield buffer
@@ -152,7 +152,8 @@ MUHIM: Javob oxirida [Manba: ...] yozishni ALBATTA unutma!"""
                     
                     if data.get('done'): break
         except Exception as e:
-            yield f"Oqim xatosi: {str(e)}"
+            logger.error(f"Ollama streaming failed: {str(e)}")
+            raise e
 
     def list_models(self):
         """List available models."""
@@ -160,10 +161,6 @@ MUHIM: Javob oxirida [Manba: ...] yozishni ALBATTA unutma!"""
             return self.session.get(f"{self.url}/api/tags").json()
         except:
             return {"models": []}
-
-# Singleton instance
-ollama_client = OllamaClient()
-
 
 # Singleton instance
 ollama_client = OllamaClient()

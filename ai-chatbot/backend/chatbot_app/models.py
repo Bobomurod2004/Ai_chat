@@ -65,6 +65,7 @@ class FAQ(models.Model):
 class FAQTranslation(models.Model):
     """
     Multilingual FAQ Content with PostgreSQL Full-Text Search support.
+    v6.0: Added dynamic_variables for automatic DynamicInfo integration.
     """
     LANGUAGE_CHOICES = [
         ('uz', 'O\'zbek'),
@@ -78,6 +79,9 @@ class FAQTranslation(models.Model):
     answer = models.TextField()
     question_variants = models.JSONField(default=list)
     embedding_id = models.CharField(max_length=100, blank=True)
+    
+    # v6.0: Dynamic Variables Support
+    dynamic_variables = models.JSONField(default=list, blank=True, help_text="DynamicInfo keys used in answer (e.g., ['tuition_fee_journalism'])")
     
     # PostgreSQL Full-Text Search fields
     question_tsv = SearchVectorField(null=True, blank=True)
@@ -119,6 +123,7 @@ class Document(models.Model):
     source_type = models.CharField(max_length=10, choices=SOURCE_TYPES, default='pdf')
     file_path = models.FileField(upload_to='documents/%Y/%m/', blank=True, null=True)
     url = models.URLField(blank=True, null=True)
+    lang = models.CharField(max_length=2, choices=FAQTranslation.LANGUAGE_CHOICES, default='uz', db_index=True)
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded')
     version = models.PositiveIntegerField(default=1)
@@ -140,13 +145,20 @@ class Document(models.Model):
 class DocumentChunk(models.Model):
     """
     Document parts stored in DB for Hybrid Search (Postgres + Vector).
+    Enhanced with v6.0 metadata for better context preservation.
     """
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='chunks')
     lang = models.CharField(max_length=2, choices=FAQTranslation.LANGUAGE_CHOICES, default='uz')
     chunk_text = models.TextField(default='')
     chunk_index = models.PositiveIntegerField()
     
-    # Metadata
+    # v6.0: Enhanced Metadata for Table/Section Context
+    section_title = models.CharField(max_length=500, blank=True, help_text="Section or heading this chunk belongs to")
+    table_headers = models.JSONField(default=list, blank=True, help_text="Column headers if from table")
+    parent_context = models.TextField(blank=True, help_text="Parent document/section context")
+    row_data = models.JSONField(default=dict, blank=True, help_text="Structured row data if from table")
+    
+    # Vector DB Metadata
     embedding_id = models.CharField(max_length=100, unique=True, db_index=True, null=True, blank=True, help_text="ID in Vector DB (Qdrant/Chroma)")
     metadata = models.JSONField(default=dict, blank=True)
     
@@ -163,9 +175,16 @@ class DocumentChunk(models.Model):
 class DynamicInfo(models.Model):
     """
     Dinamik ma'lumotlar (sanalar, narxlar) - FAQ ichida ishlatish uchun.
+    v6.0: Added multilingual support (value_uz, value_ru, value_en).
     """
     key = models.CharField(max_length=100, unique=True)
-    value = models.TextField()
+    value = models.TextField(help_text="Deprecated: use value_uz instead")
+    
+    # v6.0: Multilingual Values
+    value_uz = models.TextField(blank=True, help_text="Value in Uzbek")
+    value_ru = models.TextField(blank=True, help_text="Value in Russian")
+    value_en = models.TextField(blank=True, help_text="Value in English")
+    
     description = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
     intent_keywords = models.JSONField(default=list, blank=True, help_text="Keywords to trigger this dynamic info")
@@ -236,3 +255,27 @@ class Feedback(models.Model):
     
     class Meta:
         ordering = ['-created_at']
+
+
+class ChatAnalytics(models.Model):
+    """
+    Professional Analytics for RAG performance tracking.
+    """
+    message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='analytics')
+    response_time = models.FloatField(help_text="Response time in seconds")
+    confidence_score = models.FloatField(default=0.0)
+    source_type = models.CharField(max_length=50, blank=True)  # faq, chroma, hybrid, none
+    is_cache_hit = models.BooleanField(default=False)
+    language = models.CharField(max_length=10)
+    tokens_used = models.PositiveIntegerField(default=0)
+    error_log = models.TextField(blank=True, null=True, help_text="Raw error logs if failure occurred")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "Chat Analitikasi"
+        verbose_name_plural = "Chat Analitikalari"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Analytics for Msg {self.message_id}"

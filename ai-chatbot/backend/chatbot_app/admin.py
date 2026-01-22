@@ -8,7 +8,7 @@ from django.utils import timezone
 from .models import (
     Category, FAQ, FAQTranslation, DynamicInfo,
     Conversation, Message, Document, DocumentChunk,
-    Feedback
+    Feedback, ChatAnalytics
 )
 
 
@@ -88,8 +88,8 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ['title', 'source_type', 'status_badge', 'version', 'created_at']
-    list_filter = ['source_type', 'status']
+    list_display = ['title', 'source_type', 'lang', 'status_badge', 'version', 'created_at']
+    list_filter = ['source_type', 'lang', 'status']
     search_fields = ['title']
     readonly_fields = ['status', 'created_at', 'updated_at']
 
@@ -105,6 +105,16 @@ class DocumentAdmin(admin.ModelAdmin):
             '<span style="background: {}; color: white; padding: 3px 8px; border-radius: 4px;">{}</span>',
             color, obj.get_status_display()
         )
+    def save_model(self, request, obj, form, change):
+        """Muvaffaqiyatli saqlangandan keyin background processingni boshlash."""
+        super().save_model(request, obj, form, change)
+        
+        # Agar yangi fayl yuklangan bo'lsa yoki o'zgartirilgan bo'lsa
+        if 'file_path' in form.changed_data or not change:
+            from .tasks import process_document_task
+            # Taskni kechiktirib yuborish (Celery or synchronous fallback)
+            process_document_task.delay(obj.id)
+            messages.info(request, f"'{obj.title}' hujjatni qayta ishlash boshlandi. Kutilmoqda...")
 
 
 @admin.register(DocumentChunk)
@@ -128,3 +138,29 @@ class FeedbackAdmin(admin.ModelAdmin):
 admin.site.site_header = "UzSWLU Professional Chatbot Admin"
 admin.site.site_title = "UzSWLU Chatbot"
 admin.site.index_title = "Knowledge Base Management"
+
+
+@admin.register(ChatAnalytics)
+class ChatAnalyticsAdmin(admin.ModelAdmin):
+    list_display = [
+        'id',
+        'status_icon',
+        'message_link',
+        'response_time',
+        'confidence_score',
+        'is_cache_hit',
+        'language',
+        'created_at'
+    ]
+    list_filter = ['is_cache_hit', 'language', 'source_type', 'created_at']
+    readonly_fields = ['message', 'response_time', 'confidence_score', 'source_type', 'is_cache_hit', 'language', 'tokens_used', 'error_log', 'created_at']
+
+    def status_icon(self, obj):
+        if obj.error_log:
+            return format_html('<span title="{}" style="color: #ef4444; font-size: 18px;">⚠️</span>', obj.error_log[:100])
+        return format_html('<span style="color: #10b981; font-size: 18px;">✅</span>')
+    status_icon.short_description = 'Status'
+
+    def message_link(self, obj):
+        return obj.message.text[:50]
+    message_link.short_description = 'Message'

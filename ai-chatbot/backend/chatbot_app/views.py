@@ -4,10 +4,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from django.core.cache import cache
 from .models import (
-    Conversation, Message, FAQ, FAQTranslation, DynamicInfo, Document
+    Conversation, Message, FAQ, FAQTranslation, DynamicInfo, Document, ChatAnalytics
 )
 from .serializers import DocumentSerializer, ConversationSerializer, MessageSerializer
 from rag_service import RAGService
+from rag_cache import get_rag_cache
 from ollama_integration.client import ollama_client
 from langdetect import detect
 import logging
@@ -21,6 +22,99 @@ import json
 class ChatbotResponseViewSet(viewsets.ViewSet):
     permission_classes = [AllowAny]
     rag_service = RAGService()
+    rag_cache = get_rag_cache()
+
+    def _get_rag_response(self, user_query, lang_code, conversation=None):
+        """Unified retrieval and generation logic with analytics."""
+        import time
+        start_time = time.time()
+        is_cache_hit = False
+        source_type = 'none'
+
+        # 1. Check cache
+        cached = self.rag_cache.get(user_query, lang_code)
+        if cached:
+            is_cache_hit = True
+            response_data = {
+                'answer': cached['answer'],
+                'sources': cached['sources'],
+                'is_cache_hit': True,
+                'confidence': 1.0,
+                'source_type': 'hybrid'
+            }
+        else:
+            # 2. Retrieval via RAG Service
+            try:
+                retrieval = self.rag_service.retrieve_with_self_correction(user_query, lang_code=lang_code)
+                context = retrieval.get('context', '')
+                sources = retrieval.get('sources', [])
+                confidence = retrieval.get('grading_result', {}).get('confidence', 0.0)
+                
+                # Determine source type for analytics
+                if sources:
+                    source_type = sources[0].get('source_type', 'unknown') if len(sources) > 0 else 'none'
+
+                # 3. Decision: Use direct answer or Ollama
+                if retrieval.get('top_answer') and retrieval.get('top_confidence', 0) >= 0.9:
+                    answer = retrieval['top_answer']
+                else:
+                    answer = ollama_client.generate(user_query, context=context, language=lang_code)
+                
+                error_log = None
+            except Exception as e:
+                logger.error(f"RAG/Ollama Error: {str(e)}")
+                # Professional localized fallback
+                fallbacks = {
+                    'uz': "Kechirasiz, tizimda vaqtinchalik texnik nosozlik yuz berdi. Iltimos, birozdan so'ng qayta urinib ko'ring.",
+                    'ru': "Извините, произошла временная техническая ошибка. Пожалуйста, попробуйте позже.",
+                    'en': "Sorry, a temporary technical error occurred. Please try again later."
+                }
+                answer = fallbacks.get(lang_code, fallbacks['uz'])
+                sources = []
+                confidence = 0.0
+                error_log = str(e)
+
+            response_data = {
+                'answer': answer,
+                'sources': sources,
+                'is_cache_hit': False,
+                'confidence': confidence,
+                'source_type': source_type,
+                'error': error_log,
+                'is_error': error_log is not None
+            }
+            
+            # 4. Cache it (only if no error)
+            if not error_log:
+                self.rag_cache.set(user_query, lang_code, {
+                    'answer': answer,
+                    'sources': sources
+                })
+
+        # 5. Save and analytics log if conversation provided (always record attempt)
+        if conversation:
+            bot_msg = Message.objects.create(
+                conversation=conversation,
+                sender_type='bot',
+                text=response_data['answer'],
+                lang=lang_code,
+                metadata={'sources': response_data['sources'], 'is_cache_hit': is_cache_hit, 'error': response_data.get('error')}
+            )
+            
+            # Save Analytics
+            duration = time.time() - start_time
+            ChatAnalytics.objects.create(
+                message=bot_msg,
+                response_time=duration,
+                confidence_score=response_data['confidence'],
+                source_type=response_data['source_type'],
+                is_cache_hit=is_cache_hit,
+                language=lang_code,
+                error_log=response_data.get('error')
+            )
+            response_data['bot_msg_id'] = bot_msg.id
+
+        return response_data
 
 
     def _get_history_text(self, conversation, limit=5):
@@ -83,35 +177,22 @@ class ChatbotResponseViewSet(viewsets.ViewSet):
             # Initial ID sync for frontend
             yield f"data: {json.dumps({'session_id': str(conv.id)})}\n\n"
             
-            # Retrieval
-            retrieval = self.rag_service.retrieve_with_sources(user_query, lang_code=lang_code)
-            context = retrieval.get('context', '')
-            sources = retrieval.get('sources', [])
+            # Unified retrieval and generation logic
+            response_data = self._get_rag_response(user_query, lang_code, conversation=conv)
             
-            full_response = ""
+            if response_data['is_cache_hit']:
+                yield f"data: {json.dumps({'type': 'cache_hit'})}\n\n"
             
-            # History and Stream from Ollama
-            history = self._get_history_text(conv)
-            for chunk in ollama_client.generate_stream(
-                user_query, 
-                context=context, 
-                history=history,
-                language=lang_code
-            ):
-                full_response += chunk
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-            
-            # Save bot message at the end
-            Message.objects.create(
-                conversation=conv,
-                sender_type='bot',
-                text=full_response,
-                lang=lang_code,
-                metadata={'sources': sources}
-            )
+            if response_data.get('is_error'):
+                yield f"data: {json.dumps({'error': response_data['answer']})}\n\n"
+                return
+
+            # Since _get_rag_response uses .generate(), we still need to stream for real-time feel
+            for char in response_data['answer']:
+                yield f"data: {json.dumps({'chunk': char})}\n\n"
             
             # Final data
-            yield f"data: {json.dumps({'done': True, 'sources': sources})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'sources': response_data['sources']})}\n\n"
 
         return StreamingHttpResponse(event_stream(), content_type='text/event-stream')
 
@@ -149,45 +230,36 @@ class ChatbotResponseViewSet(viewsets.ViewSet):
         )
 
         # 3. DynamicInfo / Intent Match (Internal University Info)
-        # Check for keywords in DynamicInfo
         dynamic_answer = None
         for info in DynamicInfo.objects.filter(is_active=True):
             if any(keyword.lower() in user_query.lower() for keyword in info.intent_keywords or []):
-                dynamic_answer = info.value
+                val = getattr(info, f'value_{lang_code}', info.value_uz)
+                dynamic_answer = val if val else info.value_uz
                 break
         
         if dynamic_answer:
             bot_response = dynamic_answer
             sources = [{'title': 'Dynamic Info', 'source_type': 'database', 'relevance': 100}]
+            bot_msg = Message.objects.create(
+                conversation=conv,
+                sender_type='bot',
+                text=bot_response,
+                lang=lang_code,
+                metadata={'sources': sources}
+            )
         else:
-            # 4. RAG Service - FAQ and Documents
-            retrieval = self.rag_service.retrieve_with_sources(user_query, lang_code=lang_code)
-            context = retrieval.get('context', '')
-            sources = retrieval.get('sources', [])
-            
-            # 5. LLM Generation
-            if retrieval.get('top_answer') and retrieval.get('top_confidence', 0) >= 0.9:
-                # Direct answer from high-confidence FAQ
-                bot_response = retrieval['top_answer']
-            else:
-                # Generate via Ollama
-                bot_response = ollama_client.generate(user_query, context=context, language=lang_code)
-
-        # 6. Post-processing and Saving
-        bot_msg = Message.objects.create(
-            conversation=conv,
-            sender_type='bot',
-            text=bot_response,
-            lang=lang_code,
-            metadata={'sources': sources}
-        )
+            # 4. Use Unified RAG Response
+            response_data = self._get_rag_response(user_query, lang_code, conversation=conv)
+            bot_response = response_data['answer']
+            sources = response_data['sources']
+            is_error = response_data.get('is_error', False)
 
         return Response({
             "response": bot_response,
-            "message_id": bot_msg.id,
             "conversation_id": conv.id,
             "sources": sources,
-            "lang": lang_code
+            "lang": lang_code,
+            "is_error": is_error
         })
 
     @action(detail=False, methods=['get'])

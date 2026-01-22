@@ -5,6 +5,7 @@ Uses nomic-embed-text model via Ollama API
 import requests
 from typing import List
 import logging
+import numpy as np
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -30,18 +31,24 @@ class OllamaEmbeddingFunction:
         
         logger.info(f"✅ OllamaEmbeddingFunction initialized with model: {model_name}")
     
-    def __call__(self, input_texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for input texts using Ollama API."""
+    def __call__(self, input_texts: List[str], prefix: str = "") -> List[List[float]]:
+        """Generate embeddings with optional nomic prefixes."""
         embeddings = []
         
         for text in input_texts:
+            # v6.1: Add nomic prefixes if model is nomic-embed-text
+            if "nomic" in self.model_name and prefix:
+                full_text = f"{prefix}{text}"
+            else:
+                full_text = text
+
             try:
                 # Ollama embeddings API
                 response = self.session.post(
                     f"{self.url}/api/embeddings",
                     json={
                         "model": self.model_name,
-                        "prompt": text
+                        "prompt": full_text
                     },
                     timeout=(10, 30)  # 10s connect, 30s read
                 )
@@ -50,7 +57,12 @@ class OllamaEmbeddingFunction:
                 embedding = data.get('embedding', [])
                 
                 if embedding:
-                    embeddings.append(embedding)
+                    # Normalize the vector to unit length for better similarity tracking
+                    v = np.array(embedding)
+                    norm = np.linalg.norm(v)
+                    if norm > 0:
+                        v = v / norm
+                    embeddings.append(v.tolist())
                 else:
                     logger.warning(f"⚠️ Empty embedding for text: {text[:50]}...")
                     raise ValueError("Empty embedding returned")

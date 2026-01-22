@@ -5,6 +5,7 @@ Improved chunking for better RAG retrieval.
 """
 import os
 import re
+import json
 from typing import List, Dict, Optional
 from datetime import datetime
 
@@ -28,13 +29,12 @@ print(f"📄 Document Processor: PDF={PDF_AVAILABLE}, DOCX={DOCX_AVAILABLE}")
 class DocumentProcessor:
     """Hujjatlarni qayta ishlash va chunk'larga bo'lish."""
     
-    def __init__(self, chunk_size: int = 1500, chunk_overlap: int = 300):
-        # Chunk size: 300-500 tokens (approx 1500 chars for Uzbek)
-        # Chunk overlap: 50-100 tokens (approx 300 chars)
+    def __init__(self, chunk_size: int = 1200, chunk_overlap: int = 400):
+        # Optimized for Qwen 3B: approx 400-500 tokens
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
     
-    def process_file(self, file_path: str, doc_type: str = None) -> Dict:
+    def process_file(self, file_path: str, doc_type: str = None, doc_title: str = "Knowledge Base") -> Dict:
         """Faylni o'qib, matn va metadatani qaytaradi. Yaxshilangan error handling."""
         if not os.path.exists(file_path):
             return {
@@ -84,7 +84,7 @@ class DocumentProcessor:
             
             # Smart chunking
             print("🔪 Chunk'larga ajratilmoqda...")
-            chunks = self._smart_chunking(text)
+            chunks = self._smart_chunking(text, doc_title)
             print(f"✅ {len(chunks)} ta chunk yaratildi")
             
             if not chunks:
@@ -171,28 +171,73 @@ class DocumentProcessor:
     
     def _clean_text(self, text: str) -> str:
         """Matnni tozalash - URL'lar va ortiqcha narsalarni olib tashlash."""
+        """Matnni tozalash va jadvallarni saqlashga harakat qilish."""
+        # Non-breaking space'larni oddiy bo'shliqqa almashtirish
+        text = text.replace('\xa0', ' ')
+        
+        # Ketma-ket bo'shliqlarni (jadvallarni) pipe bilan almashtirish
+        # 3 ta yoki undan ko'p bo'shliq jadval ustunlari oralig'i bo'lishi mumkin
+        text = re.sub(r' {3,}', ' | ', text)
+        
+        # Boshqaruv belgilarini olib tashlash
+        text = "".join(ch for ch in text if ch.isprintable() or ch in '\n\r\t')
+        
+        # Ketma-ket kelgan pipe'larni bittalash
+        text = re.sub(r'(\| ){2,}', '| ', text)
+        
         # University headers often have specific patterns
         # e.g., "O'ZBEKISTON RESPUBLIKASI OLIY TA'LIM..."
         text = re.sub(r'O\'ZBEKISTON RESPUBLIKASI[^.\n]*', '', text, flags=re.IGNORECASE)
         
-        # [Apply Now] (https://...) formatidagi havolalarni olib tashlash
+        # [Apply Now] havolalarini olib tashlash
         text = re.sub(r'\[Apply[^\]]*\]\s*\([^)]+\)', '', text)
-        text = re.sub(r'\[Подать заявку[^\]]*\]\s*\([^)]+\)', '', text)
         
-        # Oddiy URL'larni olib tashlash
-        text = re.sub(r'\(https?://[^)]+\)', '', text)
-        text = re.sub(r'https?://\S+', '', text)
+        # Ketma-ket kelgan bo'shliqlarni bitta bo'shliqqa, lekin yangi qatorlarni saqlash
+        # \s+ barcha whitespace'larni (shu jumladan \n) bittaga aylantirib yuboradi
+        # Shuning uchun faqat oddiy bo'shliqlarni bittalaymiz
+        text = re.sub(r' {2,}', ' ', text)
         
-        # Ko'p bo'sh joylarni bitta qilish
-        text = re.sub(r'\s+', ' ', text)
-        text = text.strip()
+        # Ortiqcha yangi qatorlarni tozalash (3+ tasi 2 ta qoladi)
+        text = re.sub(r'\n{3,}', '\n\n', text)
         
-        # Maxsus belgilarni tozalash
+        # Maxsus belgilarni tozalash 
         text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
         
-        return text
+        return text.strip()
     
-    def _smart_chunking(self, text: str) -> List[str]:
+    def _extract_table_structure(self, text: str) -> dict:
+        """
+        v6.0: Extract table structure from text.
+        Detects tables by looking for pipe separators and multiple columns.
+        """
+        lines = text.split('\n')
+        table_data = {'headers': [], 'rows': []}
+        
+        # Look for lines with pipe separators (from our table preservation)
+        table_lines = [line for line in lines if '|' in line and line.count('|') >= 2]
+        
+        if not table_lines:
+            return table_data
+        
+        # First line with most pipes is likely the header
+        if table_lines:
+            header_line = max(table_lines, key=lambda x: x.count('|'))
+            headers = [h.strip() for h in header_line.split('|') if h.strip()]
+            table_data['headers'] = headers[:5]  # Limit to 5 columns
+            
+            # Extract row data (simple heuristic)
+            for line in table_lines[1:10]:  # Limit to 10 rows
+                cells = [c.strip() for c in line.split('|') if c.strip()]
+                if len(cells) >= 2:
+                    row_dict = {}
+                    for i, cell in enumerate(cells[:len(headers)]):
+                        if i < len(headers):
+                            row_dict[headers[i]] = cell
+                    table_data['rows'].append(row_dict)
+        
+        return table_data
+    
+    def _smart_chunking(self, text: str, doc_title: str = "Knowledge Base") -> List[str]:
         """Smart chunking - ma'noli bo'laklarga ajratish. Yaxshilangan versiya."""
         if not text:
             return []
@@ -206,13 +251,14 @@ class DocumentProcessor:
         # Har bir bo'limni chunk'larga ajratish
         chunks = []
         for section_title, section_text in sections:
-            section_chunks = self._chunk_section_improved(section_title, section_text)
-            chunks.extend(section_chunks)
+            section_chunks = self._chunk_section_improved(section_title, section_text, doc_title)
+            chunks.extend(section_chunks)  # Now returns list of dicts
         
         # Bo'sh yoki juda qisqa chunk'larni olib tashlash
-        chunks = [chunk for chunk in chunks if len(chunk.strip()) >= 50]
+        chunks = [chunk for chunk in chunks if len(chunk['text'].strip()) >= 50]
         
         # Takrorlanishlarni olib tashlash
+        # Note: _remove_duplicates will need adjustment if it expects strings
         chunks = self._remove_duplicates(chunks)
         
         return chunks
@@ -358,73 +404,96 @@ class DocumentProcessor:
         sections.sort(key=lambda x: text.find(x[1][:100]) if x[1] else 0)
         
         return sections
-    
-    def _chunk_section_improved(self, title: str, text: str) -> List[str]:
-        """Yaxshilangan: Bitta bo'limni chunk'larga ajratish - to'liq kontekst bilan."""
-        chunks = []
+
+    def _recursive_split(self, text: str, delimiters: List[str], chunk_size: int, chunk_overlap: int) -> List[str]:
+        """AnythingLLM uslubida: Matnni rekursiv ravishda bo'lish."""
+        if len(text) <= chunk_size:
+            return [text]
         
-        # Kichik bo'lim - to'liq qaytarish
-        if len(text) <= self.chunk_size:
-            chunks.append(f"[DOCUMENT:{title}]\n{text}")
-            return chunks
+        # Agat delimiterlar qolmagan bo'lsa, shunchaki kesish
+        if not delimiters:
+            return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - chunk_overlap)]
         
-        # Jumlalarga ajratish (ko'p tilli)
-        sentence_endings = r'(?<=[.!?])\s+|(?<=[.!?])\n+|(?<=[.!?])\t+'
-        sentences = re.split(sentence_endings, text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # Hozirgi delimiter bilan bo'lish
+        delimiter = delimiters[0]
+        new_delimiters = delimiters[1:]
         
-        current_chunk = f"[DOCUMENT:{title}]\n"
-        current_length = len(current_chunk)
+        splits = text.split(delimiter)
+        final_chunks = []
+        current_chunk = ""
         
-        for sentence in sentences:
-            sentence_length = len(sentence) + 1  # +1 for space
+        for split in splits:
+            if not split: continue
             
-            # Agar jumla chunk_size dan katta bo'lsa, uni alohida chunk qilish
-            if len(sentence) > self.chunk_size * 0.8:
-                # Oldingi chunk'ni saqlash
-                if current_length > len(f"[DOCUMENT:{title}]\n"):
-                    chunks.append(current_chunk.strip())
+            # Agar bitta split o'zi chunk_size dan katta bo'lsa, uni keyingi delimiterga yuborish
+            if len(split) > chunk_size:
+                if current_chunk:
+                    final_chunks.append(current_chunk.strip())
+                    current_chunk = ""
                 
-                # Katta jumlani o'ziga chunk qilish
-                chunks.append(f"[DOCUMENT:{title}]\n{sentence}")
-                current_chunk = f"[DOCUMENT:{title}]\n"
-                current_length = len(current_chunk)
+                # Rekursiv bo'lish
+                sub_chunks = self._recursive_split(split, new_delimiters, chunk_size, chunk_overlap)
+                final_chunks.extend(sub_chunks)
                 continue
             
-            # Chunk to'ldimi?
-            if current_length + sentence_length > self.chunk_size:
-                # Overlap qo'shish - oldingi chunk'ning oxirgi qismini keyingisiga qo'shish
-                if current_length > len(f"[DOCUMENT:{title}]\n"):
-                    chunks.append(current_chunk.strip())
-                    
-                    # Overlap uchun oxirgi jumlalarni olish
-                    overlap_sentences = current_chunk.split('\n')[-1].split('.')
-                    overlap_text = '. '.join(overlap_sentences[-2:]) if len(overlap_sentences) >= 2 else ""
-                    
-                    current_chunk = f"[DOCUMENT:{title}]\n"
-                    if overlap_text:
-                        current_chunk += overlap_text + ". "
-                        current_length = len(current_chunk)
+            # Agar qo'shish mumkin bo'lsa
+            if len(current_chunk) + len(split) + len(delimiter) <= chunk_size:
+                current_chunk += (delimiter if current_chunk else "") + split
+            else:
+                # To'ldi, saqlaymiz
+                if current_chunk:
+                    final_chunks.append(current_chunk.strip())
+                current_chunk = split
+        
+        if current_chunk:
+            final_chunks.append(current_chunk.strip())
             
-            # Jumlani qo'shish
-            current_chunk += sentence + ". "
-            current_length = len(current_chunk)
-        
-        # Qolgan chunk'ni qo'shish
-        if current_length > len(f"[DOCUMENT:{title}]\n"):
-            chunks.append(current_chunk.strip())
-        
-        # Minimal uzunlik tekshiruvi
-        chunks = [chunk for chunk in chunks if len(chunk) >= 100]
-        
-        return chunks
+        return final_chunks
     
-    def _remove_duplicates(self, chunks: List[str]) -> List[str]:
+    def _chunk_section_improved(self, title: str, text: str, doc_title: str = "") -> List[dict]:
+        """
+        v6.0: Enhanced with table structure extraction.
+        Returns list of dicts with 'text' and 'metadata' keys.
+        """
+        # Eng yaxshi delimiterlar iyerarxiyasi
+        delimiters = ["\n\n", "\n", ". ", " ", ""]
+        
+        # Rekursiv bo'lish
+        raw_chunks = self._recursive_split(text, delimiters, self.chunk_size, self.chunk_overlap)
+        
+        # v6.0: Extract table structure
+        table_data = self._extract_table_structure(text)
+        
+        # Meta ma'lumotlar bilan boyitish
+        final_chunks = []
+        for i, chunk in enumerate(raw_chunks):
+            if len(chunk.strip()) < 100: continue
+            
+            # Metadata labeling
+            meta_header = f"### [HUJJAT: {doc_title} | BO'LIM: {title}]\n"
+            
+            # v6.0: Build metadata
+            metadata = {
+                'section_title': title,
+                'parent_context': doc_title,
+                'table_headers': table_data.get('headers', []),
+                'row_data': table_data.get('rows', [])[i] if i < len(table_data.get('rows', [])) else {}
+            }
+            
+            final_chunks.append({
+                'text': f"{meta_header}{chunk.strip()}",
+                'metadata': metadata
+            })
+            
+        return final_chunks
+    
+    def _remove_duplicates(self, chunks: List[dict]) -> List[dict]:
         """Takrorlanuvchi chunk'larni olib tashlash."""
         unique_chunks = []
         seen_content = []
         
-        for chunk in chunks:
+        for chunk_dict in chunks:
+            chunk = chunk_dict['text']
             is_duplicate = False
             chunk_words = set(chunk.lower().split())
             
@@ -440,7 +509,7 @@ class DocumentProcessor:
                         break
             
             if not is_duplicate:
-                unique_chunks.append(chunk)
+                unique_chunks.append(chunk_dict)
                 seen_content.append(chunk_words)
         
         return unique_chunks
@@ -489,7 +558,7 @@ class DocumentRAGIntegration:
             document.save(update_fields=['status'])
             
             # Process file
-            result = self.processor.process_file(file_path, doc_type)
+            result = self.processor.process_file(file_path, doc_type, document.title)
             
             if not result['success']:
                 print(f"❌ Fayl qayta ishlashda xatolik: {result['error']}")
@@ -537,20 +606,53 @@ class DocumentRAGIntegration:
             
             # Add new chunks to Chroma
             ids = [f"doc_{document.id}_chunk_{i}" for i in range(len(chunks))]
-            metadatas = [{
-                'document_id': str(document.id),
-                'title': document.title,
-                'chunk_index': i,
-                'source': 'document',
-                'lang': document.lang,
-                'type': 'document'
-            } for i in range(len(chunks))]
+            # Infer category from title
+            category = 'Umumiy'
+            title_lower = document.title.lower()
+            if any(k in title_lower for k in ['kontrakt', 'to\'lov', 'shartnoma']): category = 'Kontrakt'
+            elif any(k in title_lower for k in ['yotoqxona', 'ttj', 'turar joy']): category = 'Talaba hayoti'
+            elif any(k in title_lower for k in ['qabul', 'imtihon', 'imtixon']): category = 'Qabul'
+            elif any(k in title_lower for k in ['magistr']): category = 'Magistratura'
+
+            # Extract text and metadata for ChromaDB
+            document_texts = [c['text'] for c in chunks]
             
-            rag.collection.add(
-                documents=chunks,
-                metadatas=metadatas,
-                ids=ids
-            )
+            metadatas = []
+            for i, c in enumerate(chunks):
+                meta = {
+                    'document_id': str(document.id),
+                    'title': document.title,
+                    'chunk_index': i,
+                    'source': 'document',
+                    'lang': document.lang,
+                    'type': 'document',
+                    'category': category
+                }
+                # Merge with processor metadata and sanitize for ChromaDB (no lists/dicts)
+                proc_meta = c.get('metadata', {})
+                for k, v in proc_meta.items():
+                    if isinstance(v, (list, dict)):
+                        meta[k] = json.dumps(v)
+                    else:
+                        meta[k] = v
+                metadatas.append(meta)
+            
+            # Add new chunks to Chroma
+            # v6.1: Manual embedding for nomic prefix support
+            if hasattr(rag.embedding_fn, 'model_name') and "nomic" in rag.embedding_fn.model_name:
+                embeddings = rag.embedding_fn(document_texts, prefix="search_document: ")
+                rag.collection.add(
+                    documents=document_texts,
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                    ids=ids
+                )
+            else:
+                rag.collection.add(
+                    documents=document_texts,
+                    metadatas=metadatas,
+                    ids=ids
+                )
             print(f"✅ {len(chunks)} ta chunk ChromaDB ga qo'shildi")
             
             # Store metadata and text in PostgreSQL
@@ -562,9 +664,9 @@ class DocumentRAGIntegration:
                     document=document,
                     chunk_index=i,
                     embedding_id=ids[i],
-                    chunk_text=chunks[i],
+                    chunk_text=chunks[i]['text'],
                     lang=document.lang,
-                    metadata={'title': document.title, 'index': i}
+                    metadata={**metadatas[i], 'title': document.title, 'index': i}
                 ) for i in range(len(chunks))
             ]
             DocumentChunk.objects.bulk_create(chunk_objs)
@@ -611,7 +713,7 @@ def reprocess_all_documents() -> Dict:
     try:
         from chatbot_app.models import Document
         # Use status instead of is_active
-        documents = Document.objects.filter(status='completed')
+        documents = Document.objects.filter(status='ready')
         
         results = {
             'total': documents.count(),
