@@ -1,0 +1,126 @@
+INFO 2026-01-22 10:15:33 rag_service <module> 14 ✅ RAG Service loading...
+
+🚀 Starting Advanced RAG v5.0 Diagnostic Tests
+================================================================================
+
+================================================================================
+🧪 TEST 1: Yotoqxona Paradox (FAQ vs Nizom)
+================================================================================
+ERROR 2026-01-22 10:15:33 posthog capture 35 Failed to send telemetry event client_start: capture() takes 1 positional argument but 3 were given
+INFO 2026-01-22 10:15:33 embedding __init__ 32 ✅ OllamaEmbeddingFunction initialized with model: nomic-embed-text
+INFO 2026-01-22 10:15:33 rag_service __init__ 76 ✅ Using Ollama nomic-embed-text embedding model
+INFO 2026-01-22 10:15:34 rag_service __init__ 106 ✅ ChromaDB: 164 docs (Space: Cosine)
+INFO 2026-01-22 10:15:34 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 1 for: Magistratura talabalari yotoqxonada yashay oladimi?
+INFO 2026-01-22 10:15:34 rag_service _detect_category 215 🎯 Category detected: Talaba hayoti
+INFO 2026-01-22 10:15:34 rag_service _detect_category 215 🎯 Category detected: Talaba hayoti
+INFO 2026-01-22 10:15:34 rag_service retrieve_with_self_correction 613 🔍 Refining query: Magistratura talabalari yotoqxonada yashay oladimi? -> Magistratura talabalari yotoqxonada yashay oladimi? (batafsil ma'lumot)
+INFO 2026-01-22 10:15:34 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 2 for: Magistratura talabalari yotoqxonada yashay oladimi? (batafsil ma'lumot)
+INFO 2026-01-22 10:15:34 rag_service _detect_category 215 🎯 Category detected: Talaba hayoti
+INFO 2026-01-22 10:15:34 rag_service _detect_category 215 🎯 Category detected: Talaba hayoti
+INFO 2026-01-22 10:15:34 rag_service retrieve_with_self_correction 613 🔍 Refining query: Magistratura talabalari yotoqxonada yashay oladimi? (batafsil ma'lumot) -> Magistratura talabalari yotoqxonada yashay oladimi? (batafsil ma'lumot) (batafsil ma'lumot)
+INFO 2026-01-22 10:15:34 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 3 for: Magistratura talabalari yotoqxonada yashay oladimi? (batafsil ma'lumot) (batafsil ma'lumot)
+INFO 2026-01-22 10:15:34 rag_service _detect_category 215 🎯 Category detected: Talaba hayoti
+INFO 2026-01-22 10:15:34 rag_service _detect_category 215 🎯 Category detected: Talaba hayoti
+
+📊 Iterations Used: 1
+✅ Relevance: False
+📈 Confidence: 12%
+
+📚 Sources Retrieved:
+  1. [FAQ] Yotoqxona (TTJ) bormi? (Relevance: 99%)
+  2. [FAQ] Talabalar oshxonasi (Relevance: 99%)
+  3. [SEMANTIC] Knowledge Base (Relevance: 59%)
+
+🤖 Generating answer...
+
+🔍 Hallucination Check:
+  - Is Grounded: False
+  - Confidence: 50%
+  - Issues: ["Noaniq ifoda topildi: 'odatda'", "Kontekstda topilmagan fakt: 'Talaba Magistraturaga'", "Kontekstda topilmagan fakt: 'Agar'", "Kontekstda topilmagan fakt: 'Raqamlar'", "Kontekstda topilmagan fakt: 'Kontakt'", "Kontekstda topilmagan fakt: 'Jadval'", "Javobda 'ha' deyilgan, lekin kontekstda 'yo'q' mavjud"]
+
+💬 Final Answer:
+**[TO'G'RI JAVOB]**
+Magistratura talabalari yotoqxonada yashay oladi.
+
+**[BATAFSIL MA'LUMOT]**  
+- Magistratura qabuli odatda avgust oyida magistr.edu.uz portali orqali amalga oshiriladi.
+- Talaba Magistraturaga kirishda chet tili sertifikati (IELTS 6.0 / CEFR B2) bo'lishi majburiydir.
+
+**[MANBA]**
+Hujjat: FAQ #121
+
+---
+
+Agar siz boshqa savollarga e'tibor bermoqchisiz, quyidagilarni o'ylang:
+- Raqamlar (Kontakt yili va foiz)
+- Jadval tahlili
+- Mantiqiy tekshiruv
+
+================================================================================
+🧪 TEST 2: Kontrakt Narxi (Numerical Data)
+================================================================================
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 1 for: Xalqaro jurnalistika fakulteti kontrakt narxi qancha?
+INFO 2026-01-22 10:16:04 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:04 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_sources 448 ⚡ Proactive DynamicInfo injection for financial query
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_self_correction 613 🔍 Refining query: Xalqaro jurnalistika fakulteti kontrakt narxi qancha? -> Xalqaro jurnalistika fakulteti kontrakt narxi qancha? (batafsil ma'lumot)
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 2 for: Xalqaro jurnalistika fakulteti kontrakt narxi qancha? (batafsil ma'lumot)
+INFO 2026-01-22 10:16:04 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:04 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_sources 448 ⚡ Proactive DynamicInfo injection for financial query
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_self_correction 613 🔍 Refining query: Xalqaro jurnalistika fakulteti kontrakt narxi qancha? (batafsil ma'lumot) -> Xalqaro jurnalistika fakulteti kontrakt narxi qancha? (batafsil ma'lumot) (batafsil ma'lumot)
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 3 for: Xalqaro jurnalistika fakulteti kontrakt narxi qancha? (batafsil ma'lumot) (batafsil ma'lumot)
+INFO 2026-01-22 10:16:04 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:04 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:04 rag_service retrieve_with_sources 448 ⚡ Proactive DynamicInfo injection for financial query
+
+📊 Iterations Used: 1
+✅ Relevance: False
+
+🔍 Hallucination Check: False
+
+💬 Final Answer:
+**[TO'G'RIDAN-TO'G'RI JAVOB]**
+Kontrakt narxi 150.000 OZS.
+
+**[BATAFSIL MA'LUMOT]**
+- Fakultet: Xalqaro jurnalistika
+- Kontrakt: 150.000 OZS
+
+**[MANBA]**
+[Hujjat: UzOZSwLU]
+
+---
+
+Agar siz boshqa savollaringiz bo'lsa, quyidagilarni ajratishimni xohlaysiz.
+
+================================================================================
+🧪 TEST 3: Query Refinement Loop
+================================================================================
+INFO 2026-01-22 10:16:22 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 1 for: Tibbiyot fakulteti bormi?
+INFO 2026-01-22 10:16:22 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:22 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:22 rag_service retrieve_with_self_correction 613 🔍 Refining query: Tibbiyot fakulteti bormi? -> Tibbiyot fakulteti bormi? (batafsil ma'lumot)
+INFO 2026-01-22 10:16:22 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 2 for: Tibbiyot fakulteti bormi? (batafsil ma'lumot)
+INFO 2026-01-22 10:16:22 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:22 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:22 rag_service retrieve_with_self_correction 613 🔍 Refining query: Tibbiyot fakulteti bormi? (batafsil ma'lumot) -> Tibbiyot fakulteti bormi? (batafsil ma'lumot) (batafsil ma'lumot)
+INFO 2026-01-22 10:16:22 rag_service retrieve_with_self_correction 576 🔄 Self-Correction Iteration 3 for: Tibbiyot fakulteti bormi? (batafsil ma'lumot) (batafsil ma'lumot)
+INFO 2026-01-22 10:16:22 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+INFO 2026-01-22 10:16:22 rag_service _detect_category 215 🎯 Category detected: Fakultetlar
+
+📊 Refinement History:
+  Iteration 1: Relevant=False, Confidence=0%
+  Iteration 2: Relevant=False, Confidence=0%
+  Iteration 3: Relevant=False, Confidence=0%
+
+✅ Final Relevance: False
+
+================================================================================
+📊 TEST SUMMARY
+================================================================================
+❌ FAIL - Yotoqxona Paradox (Iterations: 1)
+❌ FAIL - Kontrakt Narxi (Iterations: 1)
+✅ PASS - Refinement Loop (Iterations: 1)
+
+🎯 Overall: 1/3 tests passed (3333%)

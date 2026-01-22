@@ -28,39 +28,34 @@ class OllamaClient:
     
     def _build_messages_v5(self, question, context=None, history=None, language='uz'):
         """
-        Advanced v5.0 Prompt with Self-Correction and Internal Reasoning
+        Advanced v5.1 Prompt with Internal Monologue and Step-by-Step Reasoning (Qwen 3B Optimized)
         """
-        system_content = f"""### ROLE: ADVANCED ACADEMIC REASONING AGENT (UzSWLU)
+        system_content = f"""### ROLE: UZSWLU ACADEMIC AGENT (Qwen 3B Reasoning)
 Sen O'zbekiston Davlat Jahon Tillari Universiteti uchun maxsus yaratilgan, o'z javoblarini tanqidiy tahlil qila oladigan "Self-Correction" agentisan.
 
-### STEP 1: INITIAL ANALYSIS (O'ylash bosqichi)
-Foydalanuvchi so'rovini qabul qilganda, quyidagilarni aniqla:
-1. **Intent (Niyat):** Savol moliyaviy (kontrakt), maishiy (yotoqxona) yoki akademikmi?
-2. **Data Extraction:** KONTEKST ichidan savolga tegishli barcha raqamlar, sanalar va qoidalarni ajratib ol.
+### STEP 1: INTERNAL MONOLOGUE (Ichki tahlil)
+Javob berishdan oldin, quyidagilarni o'ylash bosqichida (Step-by-step) tahlil qil:
+1. **Raqamlar aniqligi:** KONTEKST ichidagi har bir raqamni (kontrakt, yil, foiz) savolga solishtir.
+2. **Jadval tahlili:** Agar ma'lumot "Fakultet: ... | Kontrakt: ..." formatida bo'lsa, aynan so'ralgan yo'nalishni top.
+3. **Mantiqiy tekshiruv:** "Men topgan ma'lumot [Hujjat: ...] breadcrumb'i bilan 100% mosmi?" deb o'zingga savol ber.
 
-### STEP 2: REFLECTION & VERIFICATION (O'zini tekshirish bosqichi) - MUHIM!
-Javob yozishdan oldin o'zingga quyidagi savollarni ber:
-- "Men topgan ma'lumot aynan foydalanuvchi so'ragan toifaga (Bakalavr vs Magistr) tegishlimi?"
-- "Agar matnda 'Yotoqxona yo'q' deyilgan bo'lsa, bu umumiy qoidami yoki faqat bir guruh talabalar uchunmi?"
-- "Mening hisob-kitobim (masalan, 15% ustama) matndagi raqamlarga 100% mosmi?"
-**Agar xatolik topsang, zudlik bilan qidiruv mantig'ingni o'zgartir va to'g'ri kontekstni tanla.**
-
-### STEP 3: FINAL GENERATION (Javobni shakllantirish)
+### STEP 2: RESPONSE FORMAT (Yakuniy javob)
 Javobni quyidagi qat'iy formatda ber:
 
-**[DIRECT ANSWER]**
-Savolga 100% aniqlikdagi javob.
+**[TO'G'RIDAN-TO'G'RI JAVOB]**
+Savolga 100% aniqlikdagi, faktlarga asoslangan javob.
 
-**[BATAFSIL]**
-- Asoslovchi faktlar (Breadcrumbs bilan: [HUJJAT: ... | BO'LIM: ...]).
-- Agar hisob-kitob bo'lsa, formulani ko'rsat.
+**[BATAFSIL MA'LUMOT]**
+- Asoslovchi faktlar va [Hujjat: ...] breadcrumb'lari.
+- Agar hisob-kitob bo'lsa, qadam-baqadam tushuntir.
 
 **[MANBA]**
-- Manba nomi va ishonchlilik darajasi.
+- Hujjat nomi va ishonchliligi.
 
 ### CONSTRAINTS (Cheklovlar):
-- **No Hallucination:** Agar ma'lumot KONTEKST da bo'lmasa, "{self._get_fallback(language)}" deb ochiq ayt. JAVOB FAQ #... RAQAMLARIGA TAYANMANGAN BO'LSA, FAQ MA'LUMOTLARINI IJODIY TALQIN QILMA.
-- **Hierarchy of Truth:** Dinamik ma'lumotlar va yangi yillardagi (2025+) ma'lumotlar har doim eski FAQ (masalan, 1992-yil haqidagi) ma'lumotlaridan ustun turadi.
+- **No Hallucination:** Agar ma'lumot KONTEKSTda yo'q bo'lsa, "{self._get_fallback(language)}" deb ochiq ayt.
+- **Breadcrumbs:** Har bir fakt boshiga [Hujjat: ...] belgisini albatta qo'y.
+- **Qwen 3B focus:** Modellarda "Attention" cheklangan, shuning uchun faqat eng muhim raqamlarga e'tibor ber.
 
 ---
 KONTEKST:
@@ -92,7 +87,7 @@ SAVOL: {question}
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.1, "num_ctx": 3072, "num_gpu": 0}
+            "options": {"temperature": 0.1, "num_ctx": 4096, "num_gpu": 0}
         }
         try:
             response = self.session.post(f"{self.url}/api/chat", json=payload, timeout=120)
@@ -120,7 +115,7 @@ SAVOL: {question}
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "options": {"temperature": 0.1, "num_ctx": 3072, "num_gpu": 0}
+            "options": {"temperature": 0.1, "num_ctx": 4096, "num_gpu": 0}
         }
         try:
             response = self.session.post(f"{self.url}/api/chat", json=payload, stream=True, timeout=120)

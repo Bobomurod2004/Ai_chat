@@ -29,8 +29,8 @@ print(f"📄 Document Processor: PDF={PDF_AVAILABLE}, DOCX={DOCX_AVAILABLE}")
 class DocumentProcessor:
     """Hujjatlarni qayta ishlash va chunk'larga bo'lish."""
     
-    def __init__(self, chunk_size: int = 1200, chunk_overlap: int = 400):
-        # Optimized for Qwen 3B: approx 400-500 tokens
+    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 200):
+        # v6.2: Reduced for more granular retrieval (propositional chunks)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
     
@@ -236,6 +236,75 @@ class DocumentProcessor:
                     table_data['rows'].append(row_dict)
         
         return table_data
+
+    def _extract_key_values(self, text: str) -> List[str]:
+        """
+        v6.2: Extract potential key-value pairs or "Fact Propositions".
+        Looks for patterns like "Name: Value" or "Subject - Description".
+        """
+        propositions = []
+        # Pattern for Key: Value or Key - Value
+        kv_patterns = [
+            r'^([^:\n\-]{2,30})[:\-]\s*(.{5,200})$', # Line starts with Key: Value
+            r'(?:^|\.\s+)([^.\n:\-]{2,30})[:\-] is (.+?)(?=\.|$)', # Key is Value
+        ]
+        
+        lines = text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line: continue
+            
+            for pattern in kv_patterns:
+                matches = re.finditer(pattern, line, re.MULTILINE)
+                for match in matches:
+                    key = match.group(1).strip()
+                    val = match.group(2).strip()
+                    if key and val:
+                        propositions.append(f"{key}: {val}")
+        
+        return propositions
+
+    def _normalize_table_content(self, text: str) -> List[str]:
+        """
+        v6.1: Normalize tables into descriptive text blocks for Qwen 3B.
+        Transforms pipe-separated lines into "Header: Value | Header: Value" format.
+        """
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        table_lines = [l for l in lines if '|' in l and l.count('|') >= 1]
+        
+        if len(table_lines) < 2:
+            return []
+            
+        # Find header (heuristic: longest line with most pipes in first 3 table lines)
+        header_candidate_idx = 0
+        max_pipes = -1
+        for i in range(min(3, len(table_lines))):
+            p_count = table_lines[i].count('|')
+            if p_count > max_pipes:
+                max_pipes = p_count
+                header_candidate_idx = i
+        
+        headers = [h.strip() for h in table_lines[header_candidate_idx].split('|')]
+        
+        normalized_rows = []
+        for i, line in enumerate(table_lines):
+            if i == header_candidate_idx: continue
+            
+            cells = [c.strip() for c in line.split('|')]
+            if len(cells) < 2: continue
+            
+            row_parts = []
+            for j, cell in enumerate(cells):
+                if not cell: continue
+                if j < len(headers) and headers[j]:
+                    row_parts.append(f"{headers[j]}: {cell}")
+                else:
+                    row_parts.append(cell)
+            
+            if row_parts:
+                normalized_rows.append(" | ".join(row_parts))
+                
+        return normalized_rows
     
     def _smart_chunking(self, text: str, doc_title: str = "Knowledge Base") -> List[str]:
         """Smart chunking - ma'noli bo'laklarga ajratish. Yaxshilangan versiya."""
@@ -453,36 +522,62 @@ class DocumentProcessor:
     def _chunk_section_improved(self, title: str, text: str, doc_title: str = "") -> List[dict]:
         """
         v6.0: Enhanced with table structure extraction.
-        Returns list of dicts with 'text' and 'metadata' keys.
+        v6.1: Added Table Normalization for Qwen 3B focus and Contextual Breadcrumbs.
+        v6.2: Added Propositional Key-Value Chunking for granular retrieval.
         """
         # Eng yaxshi delimiterlar iyerarxiyasi
         delimiters = ["\n\n", "\n", ". ", " ", ""]
         
-        # Rekursiv bo'lish
+        final_chunks = []
+        meta_header = f"[Hujjat: {doc_title}]" # Breadcrumb as suggested by user
+        
+        # 1. Table Normalization (from v6.1)
+        normalized_rows = self._normalize_table_content(text)
+        if normalized_rows:
+            for i, row in enumerate(normalized_rows):
+                final_chunks.append({
+                    'text': f"{meta_header}\nBO'LIM: {title}\n{row}",
+                    'metadata': {
+                        'section_title': title,
+                        'parent_context': doc_title,
+                        'chunk_type': 'tabular_fact',
+                        'index': i
+                    }
+                })
+        
+        # 2. Key-Value / Propositional Extraction (v6.2)
+        # Extract small facts that might be missed in large chunks
+        propositions = self._extract_key_values(text)
+        for i, prop in enumerate(propositions):
+            final_chunks.append({
+                'text': f"{meta_header}\nFAKT: {prop}",
+                'metadata': {
+                    'section_title': title,
+                    'parent_context': doc_title,
+                    'chunk_type': 'propositional_fact',
+                    'index': i
+                }
+            })
+        
+        # 3. Standard Recursive Chunking for narrative text
         raw_chunks = self._recursive_split(text, delimiters, self.chunk_size, self.chunk_overlap)
         
-        # v6.0: Extract table structure
-        table_data = self._extract_table_structure(text)
-        
-        # Meta ma'lumotlar bilan boyitish
-        final_chunks = []
         for i, chunk in enumerate(raw_chunks):
-            if len(chunk.strip()) < 100: continue
+            chunk = chunk.strip()
+            if len(chunk) < 100: continue
             
-            # Metadata labeling
-            meta_header = f"### [HUJJAT: {doc_title} | BO'LIM: {title}]\n"
-            
-            # v6.0: Build metadata
-            metadata = {
-                'section_title': title,
-                'parent_context': doc_title,
-                'table_headers': table_data.get('headers', []),
-                'row_data': table_data.get('rows', [])[i] if i < len(table_data.get('rows', [])) else {}
-            }
-            
+            # Avoid duplicating normalized table rows if the chunk is just a table
+            if normalized_rows and chunk.count('|') > 5:
+                continue
+
             final_chunks.append({
-                'text': f"{meta_header}{chunk.strip()}",
-                'metadata': metadata
+                'text': f"{meta_header}\nBO'LIM: {title}\n{chunk}",
+                'metadata': {
+                    'section_title': title,
+                    'parent_context': doc_title,
+                    'chunk_type': 'narrative_text',
+                    'index': i
+                }
             })
             
         return final_chunks
@@ -712,8 +807,8 @@ def reprocess_all_documents() -> Dict:
     """Reprocess all documents."""
     try:
         from chatbot_app.models import Document
-        # Use status instead of is_active
-        documents = Document.objects.filter(status='ready')
+        # Reprocess all documents regardless of status to ensure they get the new chunking strategy
+        documents = Document.objects.all()
         
         results = {
             'total': documents.count(),

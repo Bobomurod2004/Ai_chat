@@ -414,7 +414,7 @@ class RAGService:
         
         return sorted(documents, key=lambda x: x['similarity'], reverse=True)[:top_k]
 
-    def retrieve_with_sources(self, question: str, lang_code: str = 'uz', top_k: int = 5, category_filter: str = None) -> Dict[str, Any]:
+    def retrieve_with_sources(self, question: str, lang_code: str = 'uz', top_k: int = 4, category_filter: str = None) -> Dict[str, Any]:
         """
         Prioritized retrieval with language support.
         1. Intent-Based Filtering & Category Matching
@@ -452,41 +452,22 @@ class RAGService:
         # --- 2. Database FTS Search ---
         db_results = self.search_database(question, lang_code=lang_code, limit=top_k)
         
-        # High confidence check (Direct Match) - Threshold raised to avoid irrelevant FAQ bias
-        if db_results and db_results[0]['relevance'] >= 0.85: # Raised from 0.5
-            best = db_results[0]
-            # Verify category if intent found
-            if not intent_name or best['category'] == intent_name:
-                return {
-                    'context': f"[{best['category']}]\n{best['answer']}",
-                    'top_answer': best['answer'],
-                    'top_question': best['question'],
-                    'sources': [{
-                        'title': best['question'],
-                        'category': best['category'],
-                        'source_type': 'faq',
-                        'confidence': 1.0,
-                        'faq_id': best['faq_id']
-                    }],
-                    'total_found': len(db_results)
-                }
-        
         # 2. ChromaDB Semantic Search
         semantic_results = self.search_chromadb(question, lang_code=lang_code, top_k=top_k)
         
         merged_results = []
         seen_faq_ids = set()
         
-        # Add DB results (FAQ Boosting: multiply score by 1.25)
+        # Add DB results (FAQ Boosting: reduced for balance)
         for r in db_results:
-            confidence = r['relevance'] * 1.25
+            confidence = r['relevance'] * 1.1 # Reduced from 1.25
             
             # Boost if category matches intent
             if intent_name and r['category'] == intent_name:
-                confidence *= 1.5 
+                confidence *= 1.3 # Reduced from 1.5
             # Penalize if intent category exists but result is NOT in it
             elif intent_name and r['category'] != intent_name:
-                confidence *= 0.3 # Strict penalty for irrelevant FAQs
+                confidence *= 0.3 
 
             seen_faq_ids.add(r['faq_id'])
             merged_results.append({
@@ -506,30 +487,39 @@ class RAGService:
             confidence = r['similarity']
             # Boost if category matches intent
             if intent_name and r['category'] == intent_name:
-                confidence *= 1.4 # Increased boost for semantic match in correct category
-            # Penalize if intent category exists but result is NOT in it
+                confidence *= 1.4 
             elif intent_name and r['category'] != intent_name:
-                confidence *= 0.3 # Stricter penalty
+                confidence *= 0.3 
 
             merged_results.append({
                 'text': r['text'],
                 'title': r['title'],
                 'category': r['category'],
                 'confidence': min(0.99, confidence),
-                'source_type': r['source_type'], # 'document' or 'faq' from metadata
+                'source_type': r['source_type'],
                 'faq_id': r['faq_id']
             })
             
         merged_results.sort(key=lambda x: x['confidence'], reverse=True)
         
-        # --- 4. Rule-Based Reranking ---
-        # If we have a high-confidence FAQ (>0.75), prioritize it and limit other docs
-        has_high_conf_faq = any(r['source_type'] == 'faq' and r['confidence'] > 0.75 for r in merged_results)
+        # --- 4. Diverse Retrieval Logic ---
+        # Ensure at least 1-2 document sources if available
+        top_results = []
+        doc_count = 0
+        faq_count = 0
         
-        if has_high_conf_faq:
-            top_results = [r for r in merged_results if r['confidence'] >= 0.15]
-        else:
-            top_results = [r for r in merged_results if r['confidence'] >= 0.15]
+        for r in merged_results:
+            if len(top_results) >= top_k:
+                break
+                
+            # Diversity rule: don't fill all slots with just FAQs if documents are available
+            if r['source_type'] == 'faq':
+                if faq_count < (top_k - 1) or not any(x['source_type'] == 'document' for x in merged_results[merged_results.index(r):]):
+                    top_results.append(r)
+                    faq_count += 1
+            else:
+                top_results.append(r)
+                doc_count += 1
 
         top_results = top_results[:top_k]
         
@@ -561,7 +551,7 @@ class RAGService:
 
 
     
-    def retrieve_with_self_correction(self, question: str, lang_code: str = 'uz', top_k: int = 5, max_iterations: int = 3):
+    def retrieve_with_self_correction(self, question: str, lang_code: str = 'uz', top_k: int = 4, max_iterations: int = 3):
         """
         v5.0 + v6.0: Self-Correction with Category Pre-filtering and Query Refinement.
         """
